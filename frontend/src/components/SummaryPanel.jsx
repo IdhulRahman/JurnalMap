@@ -11,7 +11,6 @@ import {
   Sparkles,
 } from "lucide-react";
 import EvidenceBadge from "@/components/EvidenceBadge";
-import InsertToWorkspaceDialog from "@/components/Workspace/InsertToWorkspaceDialog";
 import { CATEGORY_LABEL, TIER_META } from "@/lib/tiers";
 import { useSettings } from "@/store/settings";
 import { useT } from "@/lib/useT";
@@ -42,7 +41,6 @@ export default function SummaryPanel({ docId, projectId, summary, claims, sectio
   const [evidenceByKey, setEvidenceByKey] = useState({});
   const [selectedModel, setSelectedModel] = useState(modelUsed || settings?.default_model || "");
   const [resummarizing, setResummarizing] = useState(false);
-  const [insertDialog, setInsertDialog] = useState({ open: false, payload: null });
 
   useEffect(() => {
     if (!selectedModel && settings?.default_model) setSelectedModel(settings.default_model);
@@ -340,26 +338,6 @@ export default function SummaryPanel({ docId, projectId, summary, claims, sectio
                                   {it.rationale}
                                 </div>
                               )}
-                              {projectId && (
-                                <button
-                                  data-testid={`insert-ws-evidence-${claim.id}-${i}`}
-                                  onClick={(e) => {
-                                    e.stopPropagation();
-                                    setInsertDialog({
-                                      open: true,
-                                      payload: {
-                                        document_id: docId,
-                                        sentence_id: it.sentence_id,
-                                        quote: it.text,
-                                        page: it.page,
-                                      },
-                                    });
-                                  }}
-                                  className="mt-2 inline-flex items-center gap-1 text-[10px] uppercase tracking-[0.16em] font-semibold font-ui text-[color:var(--jm-text-2)] hover:text-[color:var(--jm-text)]"
-                                >
-                                  ✍ Sisipkan ke Workspace
-                                </button>
-                              )}
                             </div>
                           ))}
                         </div>
@@ -384,14 +362,7 @@ export default function SummaryPanel({ docId, projectId, summary, claims, sectio
         </div>
       </section>
 
-      {projectId && (
-        <InsertToWorkspaceDialog
-          open={insertDialog.open}
-          onOpenChange={(o) => setInsertDialog((s) => ({ ...s, open: o }))}
-          projectId={projectId}
-          payload={insertDialog.payload}
-        />
-      )}
+      {projectId && null}
     </div>
   );
 }

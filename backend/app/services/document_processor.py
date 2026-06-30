@@ -68,6 +68,7 @@ async def process_document(
             "sections": summary_data.get("sections", {}),
             "model_used": model,
             "persona_used": (user_settings or {}).get("persona_id"),
+            "quality": parsed.get("quality") or {},
         }
         await db.documents.update_one({"id": document_id}, {"$set": update_set})
         logger.info("Document %s processed: %d sentences, %d claims",

@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
-Backend API tests for JurnalMap Workspace endpoints.
-Tests all workspace-related endpoints end-to-end.
+Backend API tests for JurnalMap "Check & Fix" feature.
+Tests workspace endpoint removal and new verification endpoints.
 """
 import os
 import sys
@@ -46,24 +46,21 @@ def log_test(name, passed, details=""):
     test_details.append({"name": name, "passed": passed, "details": details})
 
 
-def create_test_pdf():
-    """Create a small test PDF with academic content using PyMuPDF."""
+def create_pdf_with_text(text_content, filename):
+    """Create a small test PDF with specific text using PyMuPDF."""
     try:
         import fitz
         doc = fitz.open()
         page = doc.new_page()
         
-        # Add realistic academic content
-        page.insert_text((50, 72), "Social Media and Mental Health: A Quantitative Study", fontsize=14)
-        page.insert_text((50, 100), "Abstract: Social media usage exceeds three hours per day among adolescents.", fontsize=11)
-        page.insert_text((50, 120), "Adolescents experience increased anxiety and depression symptoms.", fontsize=11)
-        page.insert_text((50, 140), "This study surveys 200 university students about their social media habits.", fontsize=11)
-        page.insert_text((50, 160), "We measured psychological well-being using standardized scales.", fontsize=11)
-        page.insert_text((50, 180), "Results show a strong positive correlation between screen time and anxiety.", fontsize=11)
-        page.insert_text((50, 200), "The correlation coefficient was r=0.72, p<0.001, indicating significance.", fontsize=11)
-        page.insert_text((50, 220), "Instagram and TikTok showed the highest association with negative outcomes.", fontsize=11)
+        # Add text content line by line
+        y_pos = 72
+        for line in text_content.split('\n'):
+            if line.strip():
+                page.insert_text((50, y_pos), line.strip(), fontsize=11)
+                y_pos += 20
         
-        pdf_path = "/tmp/test_academic.pdf"
+        pdf_path = f"/tmp/{filename}"
         doc.save(pdf_path)
         doc.close()
         print(f"📄 Created test PDF: {pdf_path}")
@@ -73,264 +70,10 @@ def create_test_pdf():
         return None
 
 
-def test_workspace_endpoints():
-    """Main test function for all workspace endpoints."""
-    
-    print("=" * 60)
-    print("WORKSPACE BACKEND API TESTS")
-    print("=" * 60)
-    print()
-    
-    # Step 1: Create a project
-    print("📝 Step 1: Creating test project...")
-    try:
-        resp = requests.post(f"{API_BASE}/projects", json={
-            "name": "Workspace Test Project",
-            "description": "Testing workspace endpoints"
-        }, timeout=10)
-        
-        if resp.status_code == 200:
-            project = resp.json()
-            project_id = project["id"]
-            log_test("POST /projects - Create project", True, f"Project ID: {project_id}")
-        else:
-            log_test("POST /projects - Create project", False, f"Status {resp.status_code}: {resp.text}")
-            return
-    except Exception as e:
-        log_test("POST /projects - Create project", False, str(e))
-        return
-    
-    # Step 2: GET outline when none exists
-    print("\n📝 Step 2: GET outline (should return exists:false)...")
-    try:
-        resp = requests.get(f"{API_BASE}/projects/{project_id}/outline", timeout=10)
-        
-        if resp.status_code == 200:
-            data = resp.json()
-            if data.get("exists") == False and data.get("chapters") == [] and data.get("citation_format") == "ieee":
-                log_test("GET /outline - Empty state", True, "Returns exists:false, empty chapters, ieee format")
-            else:
-                log_test("GET /outline - Empty state", False, f"Unexpected response: {data}")
-        else:
-            log_test("GET /outline - Empty state", False, f"Status {resp.status_code}: {resp.text}")
-    except Exception as e:
-        log_test("GET /outline - Empty state", False, str(e))
-    
-    # Step 3: POST outline with IEEE format
-    print("\n📝 Step 3: POST outline with IEEE citation format...")
-    outline_payload = {
-        "title": "Skripsi Bab 2 Test",
-        "chapters": [
-            {
-                "title": "Bab 1: Pendahuluan",
-                "subchapters": [
-                    {"title": "1.1 Latar Belakang"},
-                    {"title": "1.2 Rumusan Masalah"}
-                ]
-            },
-            {
-                "title": "Bab 2: Tinjauan Pustaka",
-                "subchapters": [
-                    {"title": "2.1 Definisi Media Sosial"}
-                ]
-            }
-        ],
-        "citation_format": "ieee"
-    }
-    
-    try:
-        resp = requests.post(f"{API_BASE}/projects/{project_id}/outline", json=outline_payload, timeout=10)
-        
-        if resp.status_code == 200:
-            data = resp.json()
-            # Verify IDs are assigned
-            has_ids = all(
-                ch.get("id") and all(sc.get("id") for sc in ch.get("subchapters", []))
-                for ch in data.get("chapters", [])
-            )
-            if has_ids and data.get("exists") == True and data.get("citation_format") == "ieee" and "updated_at" in data:
-                log_test("POST /outline - Save with IEEE", True, "IDs assigned, exists:true, citation_format:ieee")
-                saved_outline = data
-                # Store subchapter IDs for later tests
-                subchapter_ids = []
-                for ch in data.get("chapters", []):
-                    for sc in ch.get("subchapters", []):
-                        subchapter_ids.append(sc["id"])
-            else:
-                log_test("POST /outline - Save with IEEE", False, f"Missing expected fields: {data}")
-                return
-        else:
-            log_test("POST /outline - Save with IEEE", False, f"Status {resp.status_code}: {resp.text}")
-            return
-    except Exception as e:
-        log_test("POST /outline - Save with IEEE", False, str(e))
-        return
-    
-    # Step 4: GET outline again to verify persistence
-    print("\n📝 Step 4: GET outline again (verify persistence)...")
-    try:
-        resp = requests.get(f"{API_BASE}/projects/{project_id}/outline", timeout=10)
-        
-        if resp.status_code == 200:
-            data = resp.json()
-            if data.get("title") == "Skripsi Bab 2 Test" and len(data.get("chapters", [])) == 2:
-                log_test("GET /outline - Verify persistence", True, "Outline persisted correctly")
-            else:
-                log_test("GET /outline - Verify persistence", False, f"Data mismatch: {data}")
-        else:
-            log_test("GET /outline - Verify persistence", False, f"Status {resp.status_code}")
-    except Exception as e:
-        log_test("GET /outline - Verify persistence", False, str(e))
-    
-    # Step 5: Update outline with APA7 format
-    print("\n📝 Step 5: Update outline to APA7 citation format...")
-    # Use the saved outline with existing IDs to preserve subchapter references
-    saved_outline["citation_format"] = "apa7"
-    try:
-        resp = requests.post(f"{API_BASE}/projects/{project_id}/outline", json=saved_outline, timeout=10)
-        
-        if resp.status_code == 200:
-            data = resp.json()
-            if data.get("citation_format") == "apa7":
-                log_test("POST /outline - Update to APA7", True, "Citation format updated to apa7")
-                saved_outline = data  # Update saved outline
-            else:
-                log_test("POST /outline - Update to APA7", False, f"Format not updated: {data.get('citation_format')}")
-        else:
-            log_test("POST /outline - Update to APA7", False, f"Status {resp.status_code}")
-    except Exception as e:
-        log_test("POST /outline - Update to APA7", False, str(e))
-    
-    # Step 6: GET content for subchapter (should be empty)
-    print("\n📝 Step 6: GET content for subchapter (empty state)...")
-    test_subchapter_id = subchapter_ids[0] if subchapter_ids else "test-id"
-    try:
-        resp = requests.get(f"{API_BASE}/projects/{project_id}/workspace/content/{test_subchapter_id}", timeout=10)
-        
-        if resp.status_code == 200:
-            data = resp.json()
-            if data.get("content") == "" and data.get("badges") == [] and data.get("references_used") == []:
-                log_test("GET /workspace/content/{id} - Empty", True, "Returns empty content, badges, references")
-            else:
-                log_test("GET /workspace/content/{id} - Empty", False, f"Unexpected data: {data}")
-        else:
-            log_test("GET /workspace/content/{id} - Empty", False, f"Status {resp.status_code}")
-    except Exception as e:
-        log_test("GET /workspace/content/{id} - Empty", False, str(e))
-    
-    # Step 7: PUT content to save
-    print("\n📝 Step 7: PUT content to save...")
-    content_payload = {
-        "content": "<p>Hello World Test Content</p>",
-        "badges": [],
-        "references_used": [],
-        "plain_paragraphs": ["Hello World Test Content"]
-    }
-    try:
-        resp = requests.put(
-            f"{API_BASE}/projects/{project_id}/workspace/content/{test_subchapter_id}",
-            json=content_payload,
-            timeout=10
-        )
-        
-        if resp.status_code == 200:
-            data = resp.json()
-            if data.get("status") == "saved" and "updated_at" in data:
-                log_test("PUT /workspace/content/{id} - Save", True, "Content saved successfully")
-            else:
-                log_test("PUT /workspace/content/{id} - Save", False, f"Unexpected response: {data}")
-        else:
-            log_test("PUT /workspace/content/{id} - Save", False, f"Status {resp.status_code}: {resp.text}")
-    except Exception as e:
-        log_test("PUT /workspace/content/{id} - Save", False, str(e))
-    
-    # Step 8: GET content again to verify save
-    print("\n📝 Step 8: GET content again (verify save)...")
-    try:
-        resp = requests.get(f"{API_BASE}/projects/{project_id}/workspace/content/{test_subchapter_id}", timeout=10)
-        
-        if resp.status_code == 200:
-            data = resp.json()
-            if data.get("content") == "<p>Hello World Test Content</p>":
-                log_test("GET /workspace/content/{id} - Verify save", True, "Content retrieved correctly")
-            else:
-                log_test("GET /workspace/content/{id} - Verify save", False, f"Content mismatch: {data.get('content')}")
-        else:
-            log_test("GET /workspace/content/{id} - Verify save", False, f"Status {resp.status_code}")
-    except Exception as e:
-        log_test("GET /workspace/content/{id} - Verify save", False, str(e))
-    
-    # Step 9: GET all contents
-    print("\n📝 Step 9: GET all workspace contents...")
-    try:
-        resp = requests.get(f"{API_BASE}/projects/{project_id}/workspace/contents", timeout=10)
-        
-        if resp.status_code == 200:
-            data = resp.json()
-            if "items" in data and len(data["items"]) >= 1:
-                log_test("GET /workspace/contents - List all", True, f"Found {len(data['items'])} content(s)")
-            else:
-                log_test("GET /workspace/contents - List all", False, f"Unexpected response: {data}")
-        else:
-            log_test("GET /workspace/contents - List all", False, f"Status {resp.status_code}")
-    except Exception as e:
-        log_test("GET /workspace/contents - List all", False, str(e))
-    
-    # Step 10: POST generate without documents (should fail)
-    print("\n📝 Step 10: POST generate without documents (should fail with 400)...")
-    try:
-        resp = requests.post(
-            f"{API_BASE}/projects/{project_id}/workspace/generate",
-            json={"subchapter_id": test_subchapter_id},
-            timeout=10
-        )
-        
-        if resp.status_code == 400:
-            error_msg = resp.json().get("detail", "").lower()
-            if "jurnal" in error_msg or "dokumen" in error_msg or "pdf" in error_msg:
-                log_test("POST /workspace/generate - No docs (400)", True, f"Correctly returns 400: {error_msg}")
-            else:
-                log_test("POST /workspace/generate - No docs (400)", False, f"Wrong error message: {error_msg}")
-        else:
-            log_test("POST /workspace/generate - No docs (400)", False, f"Expected 400, got {resp.status_code}")
-    except Exception as e:
-        log_test("POST /workspace/generate - No docs (400)", False, str(e))
-    
-    # Step 11: Upload a PDF document
-    print("\n📝 Step 11: Upload PDF document...")
-    pdf_path = create_test_pdf()
-    if not pdf_path:
-        log_test("Upload PDF", False, "Failed to create test PDF")
-        print("\n⚠️  Skipping remaining tests that require a document")
-        return
-    
-    document_id = None
-    try:
-        with open(pdf_path, "rb") as f:
-            files = {"file": ("test_academic.pdf", f, "application/pdf")}
-            resp = requests.post(
-                f"{API_BASE}/projects/{project_id}/documents",
-                files=files,
-                timeout=30
-            )
-        
-        if resp.status_code == 200:
-            doc = resp.json()
-            document_id = doc["id"]
-            log_test("POST /documents - Upload PDF", True, f"Document ID: {document_id}")
-        else:
-            log_test("POST /documents - Upload PDF", False, f"Status {resp.status_code}: {resp.text}")
-            return
-    except Exception as e:
-        log_test("POST /documents - Upload PDF", False, str(e))
-        return
-    
-    # Step 12: Poll document status until ready
-    print("\n📝 Step 12: Polling document status (max 3 minutes)...")
-    max_wait = 180  # 3 minutes
+def wait_for_document_ready(document_id, max_wait=180):
+    """Poll document status until ready or failed."""
     poll_interval = 3
     elapsed = 0
-    doc_ready = False
     
     while elapsed < max_wait:
         try:
@@ -338,77 +81,594 @@ def test_workspace_endpoints():
             if resp.status_code == 200:
                 status_data = resp.json()
                 status = status_data.get("status")
-                print(f"   Status: {status} (elapsed: {elapsed}s)")
+                print(f"   Document {document_id[:8]}... status: {status} (elapsed: {elapsed}s)")
                 
                 if status == "ready":
-                    doc_ready = True
-                    log_test("Document processing - Ready", True, f"Document ready after {elapsed}s")
-                    break
+                    return True, None
                 elif status == "failed":
                     error = status_data.get("error", "Unknown error")
-                    log_test("Document processing - Ready", False, f"Processing failed: {error}")
-                    return
+                    return False, f"Processing failed: {error}"
             
             time.sleep(poll_interval)
             elapsed += poll_interval
         except Exception as e:
-            log_test("Document processing - Ready", False, f"Polling error: {e}")
-            return
+            return False, f"Polling error: {e}"
     
-    if not doc_ready:
-        log_test("Document processing - Ready", False, f"Timeout after {max_wait}s")
+    return False, f"Timeout after {max_wait}s"
+
+
+def test_check_fix_backend():
+    """Main test function for Check & Fix backend."""
+    
+    print("=" * 80)
+    print("CHECK & FIX BACKEND API TESTS")
+    print("=" * 80)
+    print()
+    
+    # ========================================================================
+    # 1) WORKSPACE ENDPOINT REMOVAL SANITY CHECK
+    # ========================================================================
+    print("=" * 80)
+    print("1) WORKSPACE ENDPOINT REMOVAL SANITY CHECK")
+    print("=" * 80)
+    print()
+    
+    # Create a dummy project for testing removed endpoints
+    print("📝 Creating dummy project for workspace endpoint tests...")
+    try:
+        resp = requests.post(f"{API_BASE}/projects", json={
+            "name": "Workspace Removal Test",
+            "description": "Testing removed endpoints"
+        }, timeout=10)
+        
+        if resp.status_code == 200:
+            dummy_project = resp.json()
+            dummy_project_id = dummy_project["id"]
+            print(f"   Created project: {dummy_project_id}")
+        else:
+            log_test("Setup - Create dummy project", False, f"Status {resp.status_code}")
+            return
+    except Exception as e:
+        log_test("Setup - Create dummy project", False, str(e))
         return
     
-    # Step 13: POST generate with document (should succeed)
-    print("\n📝 Step 13: POST generate with document (should succeed)...")
+    # Test removed endpoints
+    removed_endpoints = [
+        ("GET", f"/projects/{dummy_project_id}/outline"),
+        ("POST", f"/projects/{dummy_project_id}/workspace/generate"),
+        ("POST", f"/projects/{dummy_project_id}/workspace/find-source"),
+        ("POST", f"/projects/{dummy_project_id}/workspace/insert-badge"),
+    ]
+    
+    for method, endpoint in removed_endpoints:
+        try:
+            if method == "GET":
+                resp = requests.get(f"{API_BASE}{endpoint}", timeout=10)
+            else:
+                resp = requests.post(f"{API_BASE}{endpoint}", json={}, timeout=10)
+            
+            if resp.status_code == 404:
+                log_test(f"Removed endpoint {method} {endpoint} returns 404", True)
+            else:
+                log_test(f"Removed endpoint {method} {endpoint} returns 404", False, 
+                        f"Expected 404, got {resp.status_code}")
+        except Exception as e:
+            log_test(f"Removed endpoint {method} {endpoint} returns 404", False, str(e))
+    
+    # Clean up dummy project
     try:
-        resp = requests.post(
-            f"{API_BASE}/projects/{project_id}/workspace/generate",
-            json={"subchapter_id": test_subchapter_id},
-            timeout=90  # Allow up to 90s for LLM call
-        )
+        requests.delete(f"{API_BASE}/projects/{dummy_project_id}", timeout=10)
+    except:
+        pass
+    
+    # ========================================================================
+    # 2) SETUP: CREATE PROJECT AND UPLOAD 2 PDFs
+    # ========================================================================
+    print("\n" + "=" * 80)
+    print("2) SETUP: CREATE PROJECT AND UPLOAD 2 PDFs")
+    print("=" * 80)
+    print()
+    
+    print("📝 Creating test project...")
+    try:
+        resp = requests.post(f"{API_BASE}/projects", json={
+            "name": "Check & Fix Test Project",
+            "description": "Testing verification endpoints"
+        }, timeout=10)
+        
+        if resp.status_code == 200:
+            project = resp.json()
+            project_id = project["id"]
+            log_test("POST /projects - Create project", True, f"Project ID: {project_id}")
+        else:
+            log_test("POST /projects - Create project", False, f"Status {resp.status_code}")
+            return
+    except Exception as e:
+        log_test("POST /projects - Create project", False, str(e))
+        return
+    
+    # Create PDF 1 - Social media study
+    pdf1_text = """Social media use exceeding three hours per day correlates with elevated anxiety in adolescents.
+A cohort of 312 high-school students was surveyed.
+Sleep deprivation mediates the relationship.
+The study found significant correlations between social media usage and mental health outcomes.
+Adolescents who spent more than three hours daily on social platforms showed higher anxiety levels."""
+    
+    pdf1_path = create_pdf_with_text(pdf1_text, "social_media_study.pdf")
+    if not pdf1_path:
+        log_test("Create PDF 1", False, "Failed to create PDF")
+        return
+    
+    # Create PDF 2 - Transformers NLP
+    pdf2_text = """Transformers achieve state-of-the-art performance on natural language processing benchmarks.
+Attention mechanisms enable long-range dependencies.
+BERT and GPT family models dominate the leaderboard.
+The transformer architecture revolutionized NLP tasks.
+Self-attention allows models to capture contextual relationships effectively."""
+    
+    pdf2_path = create_pdf_with_text(pdf2_text, "transformers_nlp.pdf")
+    if not pdf2_path:
+        log_test("Create PDF 2", False, "Failed to create PDF")
+        return
+    
+    # Upload PDF 1
+    print("\n📝 Uploading PDF 1 (social media study)...")
+    doc1_id = None
+    try:
+        with open(pdf1_path, "rb") as f:
+            files = {"file": ("social_media_study.pdf", f, "application/pdf")}
+            resp = requests.post(
+                f"{API_BASE}/projects/{project_id}/documents",
+                files=files,
+                timeout=30
+            )
+        
+        if resp.status_code == 200:
+            doc1 = resp.json()
+            doc1_id = doc1["id"]
+            log_test("POST /documents - Upload PDF 1", True, f"Document ID: {doc1_id}")
+        else:
+            log_test("POST /documents - Upload PDF 1", False, f"Status {resp.status_code}")
+            return
+    except Exception as e:
+        log_test("POST /documents - Upload PDF 1", False, str(e))
+        return
+    
+    # Upload PDF 2
+    print("\n📝 Uploading PDF 2 (transformers NLP)...")
+    doc2_id = None
+    try:
+        with open(pdf2_path, "rb") as f:
+            files = {"file": ("transformers_nlp.pdf", f, "application/pdf")}
+            resp = requests.post(
+                f"{API_BASE}/projects/{project_id}/documents",
+                files=files,
+                timeout=30
+            )
+        
+        if resp.status_code == 200:
+            doc2 = resp.json()
+            doc2_id = doc2["id"]
+            log_test("POST /documents - Upload PDF 2", True, f"Document ID: {doc2_id}")
+        else:
+            log_test("POST /documents - Upload PDF 2", False, f"Status {resp.status_code}")
+            return
+    except Exception as e:
+        log_test("POST /documents - Upload PDF 2", False, str(e))
+        return
+    
+    # Wait for both documents to be ready
+    print("\n📝 Waiting for PDF 1 to be ready (max 3 minutes)...")
+    doc1_ready, doc1_error = wait_for_document_ready(doc1_id)
+    if doc1_ready:
+        log_test("Document 1 processing - Ready", True)
+    else:
+        log_test("Document 1 processing - Ready", False, doc1_error)
+        return
+    
+    print("\n📝 Waiting for PDF 2 to be ready (max 3 minutes)...")
+    doc2_ready, doc2_error = wait_for_document_ready(doc2_id)
+    if doc2_ready:
+        log_test("Document 2 processing - Ready", True)
+    else:
+        log_test("Document 2 processing - Ready", False, doc2_error)
+        return
+    
+    # ========================================================================
+    # 3) TEST PDF QUALITY METRICS
+    # ========================================================================
+    print("\n" + "=" * 80)
+    print("3) TEST PDF QUALITY METRICS")
+    print("=" * 80)
+    print()
+    
+    print("📝 Testing GET /documents/{id} includes quality metrics...")
+    try:
+        resp = requests.get(f"{API_BASE}/documents/{doc1_id}", timeout=10)
+        
+        if resp.status_code == 200:
+            doc_data = resp.json()
+            quality = doc_data.get("quality")
+            
+            if quality:
+                required_fields = ["score", "pages_with_text", "total_pages", "tables_count", "figures_count", "label"]
+                missing_fields = [f for f in required_fields if f not in quality]
+                
+                if not missing_fields:
+                    score = quality.get("score")
+                    label = quality.get("label")
+                    pages_with_text = quality.get("pages_with_text")
+                    total_pages = quality.get("total_pages")
+                    
+                    # For a 1-page PDF with text, score should be 100, label "good", pages_with_text=1
+                    if total_pages == 1 and pages_with_text == 1 and score == 100 and label == "good":
+                        log_test("GET /documents/{id} - Quality metrics", True, 
+                                f"Quality: score={score}, label={label}, pages_with_text={pages_with_text}")
+                    else:
+                        log_test("GET /documents/{id} - Quality metrics", False, 
+                                f"Unexpected values: score={score}, label={label}, pages_with_text={pages_with_text}, total_pages={total_pages}")
+                else:
+                    log_test("GET /documents/{id} - Quality metrics", False, 
+                            f"Missing fields: {missing_fields}")
+            else:
+                log_test("GET /documents/{id} - Quality metrics", False, "No quality field in response")
+        else:
+            log_test("GET /documents/{id} - Quality metrics", False, f"Status {resp.status_code}")
+    except Exception as e:
+        log_test("GET /documents/{id} - Quality metrics", False, str(e))
+    
+    # ========================================================================
+    # 4) TEST POST /api/projects/{id}/check - BODY A (supported)
+    # ========================================================================
+    print("\n" + "=" * 80)
+    print("4) TEST POST /check - BODY A (paragraph supported)")
+    print("=" * 80)
+    print()
+    
+    body_a = {
+        "text": "Social media use exceeding three hours per day correlates with elevated anxiety in adolescents.",
+        "citation_format": "ieee"
+    }
+    
+    print("📝 Testing Body A (should be supported)...")
+    try:
+        resp = requests.post(f"{API_BASE}/projects/{project_id}/check", json=body_a, timeout=30)
         
         if resp.status_code == 200:
             data = resp.json()
-            content = data.get("content", "")
+            units = data.get("units", [])
+            summary = data.get("summary", {})
+            annotated_html = data.get("annotated_html", "")
             badges = data.get("badges", [])
-            references = data.get("references_used", [])
             
-            # Check if content is generated
-            if content and isinstance(content, str) and len(content) > 0:
-                # Check for citation badges in content
-                has_badges = "jm-citation-badge" in content or len(badges) > 0
-                log_test(
-                    "POST /workspace/generate - With docs",
-                    True,
-                    f"Generated content ({len(content)} chars), {len(badges)} badges, {len(references)} refs"
-                )
+            # Expect: units length 1; that unit "status" == "supported"
+            if len(units) == 1:
+                unit = units[0]
+                status = unit.get("status")
+                badge = unit.get("badge")
+                
+                if status == "supported":
+                    # Check badge present with label "[1]"
+                    if badge and badge.get("label") == "[1]":
+                        # Check annotated_html contains class "cf-supported" and citation badge
+                        if "cf-supported" in annotated_html and "jm-citation-badge" in annotated_html:
+                            # Check summary.supported == 1
+                            if summary.get("supported") == 1:
+                                log_test("Body A - Paragraph supported", True, 
+                                        f"Status: {status}, Badge: {badge.get('label')}, Summary: {summary}")
+                            else:
+                                log_test("Body A - Paragraph supported", False, 
+                                        f"summary.supported != 1: {summary}")
+                        else:
+                            log_test("Body A - Paragraph supported", False, 
+                                    "annotated_html missing cf-supported or jm-citation-badge")
+                    else:
+                        log_test("Body A - Paragraph supported", False, 
+                                f"Badge missing or wrong label: {badge}")
+                else:
+                    log_test("Body A - Paragraph supported", False, f"Status is {status}, expected 'supported'")
             else:
-                log_test("POST /workspace/generate - With docs", False, f"Empty or invalid content: {data}")
+                log_test("Body A - Paragraph supported", False, f"Expected 1 unit, got {len(units)}")
         else:
-            log_test("POST /workspace/generate - With docs", False, f"Status {resp.status_code}: {resp.text}")
+            log_test("Body A - Paragraph supported", False, f"Status {resp.status_code}: {resp.text}")
     except Exception as e:
-        log_test("POST /workspace/generate - With docs", False, str(e))
+        log_test("Body A - Paragraph supported", False, str(e))
     
-    # Step 14: Get sentence detail
-    print("\n📝 Step 14: GET sentence detail...")
-    # First, get a valid sentence_id from the document
+    # ========================================================================
+    # 5) TEST POST /check - BODY B (unsupported)
+    # ========================================================================
+    print("\n" + "=" * 80)
+    print("5) TEST POST /check - BODY B (paragraph unsupported)")
+    print("=" * 80)
+    print()
+    
+    body_b = {
+        "text": "Photosynthesis is performed by chloroplasts using sunlight to produce glucose."
+    }
+    
+    print("📝 Testing Body B (should be unsupported)...")
+    try:
+        resp = requests.post(f"{API_BASE}/projects/{project_id}/check", json=body_b, timeout=30)
+        
+        if resp.status_code == 200:
+            data = resp.json()
+            units = data.get("units", [])
+            summary = data.get("summary", {})
+            
+            if len(units) == 1:
+                unit = units[0]
+                status = unit.get("status")
+                
+                if status == "unsupported" and summary.get("unsupported") == 1:
+                    log_test("Body B - Paragraph unsupported", True, f"Status: {status}, Summary: {summary}")
+                else:
+                    log_test("Body B - Paragraph unsupported", False, 
+                            f"Status: {status}, Summary: {summary}")
+            else:
+                log_test("Body B - Paragraph unsupported", False, f"Expected 1 unit, got {len(units)}")
+        else:
+            log_test("Body B - Paragraph unsupported", False, f"Status {resp.status_code}")
+    except Exception as e:
+        log_test("Body B - Paragraph unsupported", False, str(e))
+    
+    # ========================================================================
+    # 6) TEST POST /check - BODY C (multi-paragraph + list)
+    # ========================================================================
+    print("\n" + "=" * 80)
+    print("6) TEST POST /check - BODY C (multi-paragraph slicing & list)")
+    print("=" * 80)
+    print()
+    
+    body_c = {
+        "text": """Social media use exceeding three hours per day correlates with elevated anxiety.
+
+- Transformers achieve state-of-the-art performance on natural language processing benchmarks.
+- Attention mechanisms enable long-range dependencies.
+- BERT and GPT family models dominate the leaderboard.
+
+Photosynthesis is performed by chloroplasts using sunlight to produce glucose."""
+    }
+    
+    print("📝 Testing Body C (multi-paragraph + list)...")
+    try:
+        resp = requests.post(f"{API_BASE}/projects/{project_id}/check", json=body_c, timeout=30)
+        
+        if resp.status_code == 200:
+            data = resp.json()
+            units = data.get("units", [])
+            summary = data.get("summary", {})
+            annotated_html = data.get("annotated_html", "")
+            
+            # Expect: units.length >= 5 (1 paragraph + 3 list items + 1 unsupported paragraph)
+            if len(units) >= 5:
+                # Check for list items
+                list_items = [u for u in units if u.get("kind") == "list_item"]
+                
+                # At least one supported unit cites PDF 1; list items cite PDF 2
+                supported_units = [u for u in units if u.get("status") == "supported"]
+                
+                # Check summary.unsupported >= 1
+                if summary.get("unsupported") >= 1:
+                    # Check annotated_html contains a <ul> or <ol> with class "cf-list"
+                    if "cf-list" in annotated_html and ("<ul" in annotated_html or "<ol" in annotated_html):
+                        log_test("Body C - Multi-paragraph + list", True, 
+                                f"Units: {len(units)}, List items: {len(list_items)}, Supported: {len(supported_units)}, Summary: {summary}")
+                    else:
+                        log_test("Body C - Multi-paragraph + list", False, 
+                                "annotated_html missing cf-list or list tags")
+                else:
+                    log_test("Body C - Multi-paragraph + list", False, 
+                            f"summary.unsupported < 1: {summary}")
+            else:
+                log_test("Body C - Multi-paragraph + list", False, 
+                        f"Expected >= 5 units, got {len(units)}")
+        else:
+            log_test("Body C - Multi-paragraph + list", False, f"Status {resp.status_code}")
+    except Exception as e:
+        log_test("Body C - Multi-paragraph + list", False, str(e))
+    
+    # ========================================================================
+    # 7) TEST POST /check - BODY D (long paragraph chunking)
+    # ========================================================================
+    print("\n" + "=" * 80)
+    print("7) TEST POST /check - BODY D (long paragraph >5 sentences gets chunked)")
+    print("=" * 80)
+    print()
+    
+    body_d = {
+        "text": """Social media platforms have become ubiquitous in modern society. 
+Adolescents spend an average of three to four hours daily on these platforms. 
+Research indicates a correlation between excessive social media use and mental health issues. 
+Anxiety and depression rates have increased among teenagers in recent years. 
+Sleep patterns are disrupted by late-night social media engagement. 
+Academic performance may suffer due to distraction and reduced study time. 
+Parents and educators express concern about the long-term effects of social media addiction."""
+    }
+    
+    print("📝 Testing Body D (7-sentence paragraph should be chunked)...")
+    try:
+        resp = requests.post(f"{API_BASE}/projects/{project_id}/check", json=body_d, timeout=30)
+        
+        if resp.status_code == 200:
+            data = resp.json()
+            units = data.get("units", [])
+            
+            # Expect units > 1 (multiple sub-paragraphs), each text non-empty
+            if len(units) > 1:
+                all_have_text = all(u.get("text") and len(u.get("text", "").strip()) > 0 for u in units)
+                
+                if all_have_text:
+                    log_test("Body D - Long paragraph chunking", True, 
+                            f"Chunked into {len(units)} units")
+                else:
+                    log_test("Body D - Long paragraph chunking", False, 
+                            "Some units have empty text")
+            else:
+                log_test("Body D - Long paragraph chunking", False, 
+                        f"Expected > 1 unit, got {len(units)}")
+        else:
+            log_test("Body D - Long paragraph chunking", False, f"Status {resp.status_code}")
+    except Exception as e:
+        log_test("Body D - Long paragraph chunking", False, str(e))
+    
+    # ========================================================================
+    # 8) TEST POST /check - BODY E (bibliography boost)
+    # ========================================================================
+    print("\n" + "=" * 80)
+    print("8) TEST POST /check - BODY E (bibliography boost)")
+    print("=" * 80)
+    print()
+    
+    body_e = {
+        "text": "Social media use exceeding three hours per day correlates with elevated anxiety in adolescents.",
+        "bibliography": "Smith 2023 social media anxiety adolescents",
+        "citation_format": "ieee"
+    }
+    
+    print("📝 Testing Body E (with bibliography boost)...")
+    try:
+        resp = requests.post(f"{API_BASE}/projects/{project_id}/check", json=body_e, timeout=30)
+        
+        if resp.status_code == 200:
+            data = resp.json()
+            units = data.get("units", [])
+            
+            if len(units) == 1:
+                unit_with_bib = units[0]
+                score_with_bib = unit_with_bib.get("score", 0)
+                
+                # Compare with Body A's score (without bibliography)
+                # We already tested Body A, so we know it should be supported
+                # The score should be equal or higher with bibliography
+                # For this test, we just verify it's still supported and has a reasonable score
+                if unit_with_bib.get("status") == "supported" and score_with_bib > 0:
+                    log_test("Body E - Bibliography boost", True, 
+                            f"Score with bibliography: {score_with_bib}, Status: supported")
+                else:
+                    log_test("Body E - Bibliography boost", False, 
+                            f"Status: {unit_with_bib.get('status')}, Score: {score_with_bib}")
+            else:
+                log_test("Body E - Bibliography boost", False, f"Expected 1 unit, got {len(units)}")
+        else:
+            log_test("Body E - Bibliography boost", False, f"Status {resp.status_code}")
+    except Exception as e:
+        log_test("Body E - Bibliography boost", False, str(e))
+    
+    # ========================================================================
+    # 9) TEST POST /check - BODY F (document_ids filter)
+    # ========================================================================
+    print("\n" + "=" * 80)
+    print("9) TEST POST /check - BODY F (document_ids filter)")
+    print("=" * 80)
+    print()
+    
+    body_f = {
+        "text": """Social media use exceeding three hours per day correlates with elevated anxiety.
+
+- Transformers achieve state-of-the-art performance on natural language processing benchmarks.
+- Attention mechanisms enable long-range dependencies.
+- BERT and GPT family models dominate the leaderboard.
+
+Photosynthesis is performed by chloroplasts using sunlight to produce glucose.""",
+        "document_ids": [doc1_id]  # Only PDF 1 (social media)
+    }
+    
+    print(f"📝 Testing Body F (document_ids filter - only doc1: {doc1_id[:8]}...)...")
+    try:
+        resp = requests.post(f"{API_BASE}/projects/{project_id}/check", json=body_f, timeout=30)
+        
+        if resp.status_code == 200:
+            data = resp.json()
+            units = data.get("units", [])
+            
+            # List items about transformers should NOT be supported (no PDF 2 in scope)
+            list_items = [u for u in units if u.get("kind") == "list_item"]
+            transformer_items_unsupported = all(
+                u.get("status") != "supported" 
+                for u in list_items 
+                if "transformer" in u.get("text", "").lower() or "bert" in u.get("text", "").lower()
+            )
+            
+            if transformer_items_unsupported:
+                log_test("Body F - document_ids filter", True, 
+                        "Transformer list items not supported (PDF 2 excluded)")
+            else:
+                log_test("Body F - document_ids filter", False, 
+                        "Transformer items were supported despite PDF 2 being excluded")
+        else:
+            log_test("Body F - document_ids filter", False, f"Status {resp.status_code}")
+    except Exception as e:
+        log_test("Body F - document_ids filter", False, str(e))
+    
+    # ========================================================================
+    # 10) TEST GET /api/projects/{id}/check
+    # ========================================================================
+    print("\n" + "=" * 80)
+    print("10) TEST GET /check (retrieve last run)")
+    print("=" * 80)
+    print()
+    
+    print("📝 Testing GET /check returns last run...")
+    try:
+        resp = requests.get(f"{API_BASE}/projects/{project_id}/check", timeout=10)
+        
+        if resp.status_code == 200:
+            data = resp.json()
+            
+            if data.get("exists") == True:
+                # Should match the latest run (Body F)
+                if "units" in data and "summary" in data and "annotated_html" in data:
+                    log_test("GET /check - Returns last run", True, 
+                            f"exists: true, units: {len(data.get('units', []))}")
+                else:
+                    log_test("GET /check - Returns last run", False, 
+                            "Missing expected fields")
+            else:
+                log_test("GET /check - Returns last run", False, "exists is not true")
+        else:
+            log_test("GET /check - Returns last run", False, f"Status {resp.status_code}")
+    except Exception as e:
+        log_test("GET /check - Returns last run", False, str(e))
+    
+    # ========================================================================
+    # 11) TEST SENTENCE DETAIL (regression)
+    # ========================================================================
+    print("\n" + "=" * 80)
+    print("11) TEST SENTENCE DETAIL (regression)")
+    print("=" * 80)
+    print()
+    
+    # Get a valid sentence_id from the last check run
+    print("📝 Testing GET /documents/{id}/sentence/{sentence_id}...")
     sentence_id = None
     try:
-        # Query MongoDB directly or use badges from generate response
-        # For now, we'll try to get sentences from the last generate response
-        if 'data' in locals() and data.get("badges"):
-            sentence_id = data["badges"][0].get("sentence_id")
+        # Get sentence_id from last check run
+        resp = requests.get(f"{API_BASE}/projects/{project_id}/check", timeout=10)
+        if resp.status_code == 200:
+            data = resp.json()
+            badges = data.get("badges", [])
+            if badges:
+                sentence_id = badges[0].get("sentence_id")
+                document_id = badges[0].get("document_id")
         
-        if sentence_id:
+        if sentence_id and document_id:
             resp = requests.get(f"{API_BASE}/documents/{document_id}/sentence/{sentence_id}", timeout=10)
             
             if resp.status_code == 200:
                 sent_data = resp.json()
-                if "text" in sent_data and "page" in sent_data and "document_title" in sent_data:
-                    log_test("GET /sentence/{id} - Valid ID", True, f"Retrieved sentence: {sent_data.get('text', '')[:50]}...")
+                text = sent_data.get("text", "")
+                
+                # Full sentence text (ends with . ! or ?)
+                if text and (text.endswith('.') or text.endswith('!') or text.endswith('?')):
+                    if "page" in sent_data and "document_title" in sent_data:
+                        log_test("GET /sentence/{id} - Valid ID", True, 
+                                f"Retrieved sentence: {text[:50]}...")
+                    else:
+                        log_test("GET /sentence/{id} - Valid ID", False, 
+                                "Missing page or document_title")
                 else:
-                    log_test("GET /sentence/{id} - Valid ID", False, f"Missing fields: {sent_data}")
+                    log_test("GET /sentence/{id} - Valid ID", False, 
+                            f"Text doesn't end with punctuation: {text}")
             else:
                 log_test("GET /sentence/{id} - Valid ID", False, f"Status {resp.status_code}")
         else:
@@ -416,122 +676,160 @@ def test_workspace_endpoints():
     except Exception as e:
         log_test("GET /sentence/{id} - Valid ID", False, str(e))
     
-    # Step 15: Test sentence detail with invalid ID (should 404)
-    print("\n📝 Step 15: GET sentence detail with fake ID (should 404)...")
+    # Test with unknown sentence_id (should 404)
+    print("\n📝 Testing GET /sentence/{id} with unknown ID (should 404)...")
     try:
-        resp = requests.get(f"{API_BASE}/documents/{document_id}/sentence/fake-sentence-id", timeout=10)
+        resp = requests.get(f"{API_BASE}/documents/{doc1_id}/sentence/unknown-sentence-id", timeout=10)
         
         if resp.status_code == 404:
-            log_test("GET /sentence/{id} - Invalid ID (404)", True, "Correctly returns 404")
+            log_test("GET /sentence/{id} - Unknown ID (404)", True)
         else:
-            log_test("GET /sentence/{id} - Invalid ID (404)", False, f"Expected 404, got {resp.status_code}")
+            log_test("GET /sentence/{id} - Unknown ID (404)", False, 
+                    f"Expected 404, got {resp.status_code}")
     except Exception as e:
-        log_test("GET /sentence/{id} - Invalid ID (404)", False, str(e))
+        log_test("GET /sentence/{id} - Unknown ID (404)", False, str(e))
     
-    # Step 16: Test insert-badge with APA7 format
-    print("\n📝 Step 16: POST insert-badge with APA7 format...")
+    # ========================================================================
+    # 12) REGRESSION TESTS
+    # ========================================================================
+    print("\n" + "=" * 80)
+    print("12) REGRESSION TESTS")
+    print("=" * 80)
+    print()
+    
+    # Test GET /api/
+    print("📝 Testing GET /api/ (health check)...")
     try:
-        badge_payload = {
-            "subchapter_id": test_subchapter_id,
-            "document_id": document_id,
-            "sentence_id": sentence_id if sentence_id else "test-sentence",
-            "quote": "Sample quote text for testing",
-            "page": 1
-        }
-        resp = requests.post(
-            f"{API_BASE}/projects/{project_id}/workspace/insert-badge",
-            json=badge_payload,
-            timeout=10
-        )
+        resp = requests.get(f"{API_BASE}/", timeout=10)
         
         if resp.status_code == 200:
             data = resp.json()
-            badge = data.get("badge", {})
-            label = badge.get("label", "")
-            citation_format = data.get("citation_format", "")
-            
-            # APA7 should have parentheses, not brackets
-            if citation_format == "apa7" and "(" in label and ")" in label and "[" not in label:
-                log_test("POST /insert-badge - APA7 format", True, f"Label: {label}")
+            if data.get("app") == "JurnalMap" and data.get("status") == "ok":
+                log_test("GET /api/ - Health check", True)
             else:
-                log_test("POST /insert-badge - APA7 format", False, f"Wrong format: {label} (expected APA7 with parentheses)")
+                log_test("GET /api/ - Health check", False, f"Unexpected response: {data}")
         else:
-            log_test("POST /insert-badge - APA7 format", False, f"Status {resp.status_code}: {resp.text}")
+            log_test("GET /api/ - Health check", False, f"Status {resp.status_code}")
     except Exception as e:
-        log_test("POST /insert-badge - APA7 format", False, str(e))
+        log_test("GET /api/ - Health check", False, str(e))
     
-    # Step 17: Change to IEEE and test insert-badge again
-    print("\n📝 Step 17: Change to IEEE and test insert-badge...")
+    # Test POST /api/projects (already tested above, but verify again)
+    print("\n📝 Testing POST /projects (regression)...")
     try:
-        # Update outline to IEEE (use saved_outline to preserve IDs)
-        saved_outline["citation_format"] = "ieee"
-        resp = requests.post(f"{API_BASE}/projects/{project_id}/outline", json=saved_outline, timeout=10)
+        resp = requests.post(f"{API_BASE}/projects", json={
+            "name": "Regression Test Project",
+            "description": "Testing project creation"
+        }, timeout=10)
         
         if resp.status_code == 200:
-            # Now test insert-badge with IEEE
-            resp = requests.post(
-                f"{API_BASE}/projects/{project_id}/workspace/insert-badge",
-                json=badge_payload,
-                timeout=10
-            )
+            reg_project = resp.json()
+            reg_project_id = reg_project["id"]
+            log_test("POST /projects - Regression", True, f"Project ID: {reg_project_id}")
             
+            # Test GET project by ID
+            resp = requests.get(f"{API_BASE}/projects/{reg_project_id}", timeout=10)
             if resp.status_code == 200:
-                data = resp.json()
-                badge = data.get("badge", {})
-                label = badge.get("label", "")
-                citation_format = data.get("citation_format", "")
-                
-                # IEEE should have brackets like [1], [2], etc.
-                if citation_format == "ieee" and "[" in label and "]" in label:
-                    log_test("POST /insert-badge - IEEE format", True, f"Label: {label}")
-                else:
-                    log_test("POST /insert-badge - IEEE format", False, f"Wrong format: {label} (expected IEEE with brackets)")
+                log_test("GET /projects/{id} - Regression", True)
             else:
-                log_test("POST /insert-badge - IEEE format", False, f"Status {resp.status_code}")
+                log_test("GET /projects/{id} - Regression", False, f"Status {resp.status_code}")
+            
+            # Test DELETE project
+            resp = requests.delete(f"{API_BASE}/projects/{reg_project_id}", timeout=10)
+            if resp.status_code == 200:
+                log_test("DELETE /projects/{id} - Regression", True)
+            else:
+                log_test("DELETE /projects/{id} - Regression", False, f"Status {resp.status_code}")
         else:
-            log_test("POST /insert-badge - IEEE format", False, "Failed to update outline to IEEE")
+            log_test("POST /projects - Regression", False, f"Status {resp.status_code}")
     except Exception as e:
-        log_test("POST /insert-badge - IEEE format", False, str(e))
+        log_test("POST /projects - Regression", False, str(e))
     
-    # Step 18: DELETE project (cascade delete)
-    print("\n📝 Step 18: DELETE project (cascade delete)...")
+    # Test GET /api/projects (list)
+    print("\n📝 Testing GET /projects (list)...")
     try:
+        resp = requests.get(f"{API_BASE}/projects", timeout=10)
+        
+        if resp.status_code == 200:
+            projects = resp.json()
+            if isinstance(projects, list):
+                log_test("GET /projects - List", True, f"Found {len(projects)} projects")
+            else:
+                log_test("GET /projects - List", False, "Response is not a list")
+        else:
+            log_test("GET /projects - List", False, f"Status {resp.status_code}")
+    except Exception as e:
+        log_test("GET /projects - List", False, str(e))
+    
+    # Test POST /api/settings/test-api-key
+    print("\n📝 Testing POST /settings/test-api-key...")
+    try:
+        resp = requests.post(f"{API_BASE}/settings/test-api-key", json={
+            "provider": "gemini",
+            "model": "gemini-2.5-flash",
+            "api_key": "AQ.Ab8RN6KcXL7KCacLa87cmsjawr9IYitKC7lkD16AZEORGSDZng"
+        }, timeout=30)
+        
+        if resp.status_code == 200:
+            data = resp.json()
+            if data.get("ok") == True:
+                log_test("POST /settings/test-api-key - Valid key", True, 
+                        f"Provider: {data.get('provider')}, Model: {data.get('model')}")
+            else:
+                log_test("POST /settings/test-api-key - Valid key", False, 
+                        f"ok is not true: {data}")
+        else:
+            log_test("POST /settings/test-api-key - Valid key", False, f"Status {resp.status_code}")
+    except Exception as e:
+        log_test("POST /settings/test-api-key - Valid key", False, str(e))
+    
+    # ========================================================================
+    # 13) CASCADE DELETE TEST
+    # ========================================================================
+    print("\n" + "=" * 80)
+    print("13) CASCADE DELETE TEST")
+    print("=" * 80)
+    print()
+    
+    print("📝 Testing DELETE project cascades check_runs...")
+    try:
+        # Delete the main test project
         resp = requests.delete(f"{API_BASE}/projects/{project_id}", timeout=10)
         
         if resp.status_code == 200:
-            data = resp.json()
-            if data.get("deleted") == True:
-                log_test("DELETE /projects/{id} - Cascade", True, "Project deleted")
-                
-                # Verify outline is gone
-                resp = requests.get(f"{API_BASE}/projects/{project_id}/outline", timeout=10)
-                if resp.status_code == 404 or (resp.status_code == 200 and resp.json().get("exists") == False):
-                    log_test("DELETE cascade - Outline removed", True, "Outline no longer exists")
+            log_test("DELETE /projects/{id} - Success", True)
+            
+            # Verify check_run is gone
+            resp = requests.get(f"{API_BASE}/projects/{project_id}/check", timeout=10)
+            
+            # Should return 404 or exists: false
+            if resp.status_code == 404:
+                log_test("DELETE cascade - check_runs removed (404)", True)
+            elif resp.status_code == 200:
+                data = resp.json()
+                if data.get("exists") == False:
+                    log_test("DELETE cascade - check_runs removed (exists:false)", True)
                 else:
-                    log_test("DELETE cascade - Outline removed", False, f"Outline still exists: {resp.status_code}")
+                    log_test("DELETE cascade - check_runs removed", False, 
+                            "check_run still exists after project deletion")
             else:
-                log_test("DELETE /projects/{id} - Cascade", False, f"Unexpected response: {data}")
+                log_test("DELETE cascade - check_runs removed", False, 
+                        f"Unexpected status {resp.status_code}")
         else:
-            log_test("DELETE /projects/{id} - Cascade", False, f"Status {resp.status_code}")
+            log_test("DELETE /projects/{id} - Success", False, f"Status {resp.status_code}")
     except Exception as e:
-        log_test("DELETE /projects/{id} - Cascade", False, str(e))
-    
-    # Note about workspace_contents cascade
-    print("\n📝 Note: Checking if workspace_contents are cascade-deleted...")
-    print("   (This requires MongoDB query - backend may not cascade workspace_* collections)")
-    print("   If they remain, that's acceptable for now but should be flagged.")
+        log_test("DELETE cascade - check_runs removed", False, str(e))
 
 
 if __name__ == "__main__":
-    test_workspace_endpoints()
+    test_check_fix_backend()
     
-    print("\n" + "=" * 60)
+    print("\n" + "=" * 80)
     print("TEST SUMMARY")
-    print("=" * 60)
+    print("=" * 80)
     print(f"✅ Passed: {tests_passed}")
     print(f"❌ Failed: {tests_failed}")
     print(f"📊 Total:  {tests_passed + tests_failed}")
-    print("=" * 60)
+    print("=" * 80)
     
     if tests_failed > 0:
         print("\n⚠️  Some tests failed. See details above.")

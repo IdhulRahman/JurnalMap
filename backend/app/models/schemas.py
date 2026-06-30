@@ -48,6 +48,7 @@ class DocumentMeta(BaseModel):
     sections: Optional[dict] = None  # {abstract, objective, method, results, conclusion}
     model_used: Optional[str] = None  # which LLM produced the current summary
     persona_used: Optional[str] = None
+    quality: Optional[dict] = None  # {score, pages_with_text, total_pages, tables_count, figures_count, label}
     uploaded_at: str = Field(default_factory=utcnow_iso)
 
 

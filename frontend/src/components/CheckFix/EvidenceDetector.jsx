@@ -13,36 +13,28 @@ export default function EvidenceDetector({ projectId, badge }) {
     setData(null);
     setErr("");
     if (!badge) return;
-    // If badge already has quote text + page, render it immediately and try to enrich.
     setData({
       text: badge.quote || "",
       page: badge.page,
       document_title: badge.document_title,
       document_id: badge.document_id,
       sentence_id: badge.sentence_id,
-      authors: badge.authors,
-      year: badge.year,
     });
     if (badge.document_id && badge.sentence_id) {
       setBusy(true);
       api
         .getSentenceDetail(badge.document_id, badge.sentence_id)
-        .then((d) => {
-          if (!abort) setData(d);
-        })
-        .catch(() => {
-          if (!abort) setErr("Tidak dapat memuat detail kalimat.");
-        })
+        .then((d) => { if (!abort) setData(d); })
+        .catch(() => { if (!abort) setErr("Tidak dapat memuat detail kalimat."); })
         .finally(() => !abort && setBusy(false));
     }
-    return () => {
-      abort = true;
-    };
+    return () => { abort = true; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [badge?.badge_id]);
 
   return (
     <section
-      data-testid="workspace-evidence-detector"
+      data-testid="checkfix-evidence-detector"
       className="rounded-xl border border-[color:var(--jm-border)] bg-[color:var(--jm-reading)] p-4 min-h-[200px]"
     >
       <div className="flex items-center gap-2 text-[10px] uppercase tracking-[0.22em] font-semibold text-[color:var(--jm-text-3)] mb-3">
@@ -50,7 +42,7 @@ export default function EvidenceDetector({ projectId, badge }) {
       </div>
       {!badge ? (
         <div className="text-xs text-[color:var(--jm-text-3)] font-ui italic">
-          Klik lencana sitasi di editor untuk melihat bukti.
+          Klik lencana sitasi pada hasil verifikasi untuk melihat kalimat sumber.
         </div>
       ) : (
         <div className="space-y-3">
@@ -62,11 +54,11 @@ export default function EvidenceDetector({ projectId, badge }) {
           </div>
           <div className="text-[10px] uppercase tracking-[0.18em] font-semibold text-[color:var(--jm-text-3)] flex items-center gap-1">
             <FileText className="w-3 h-3" />
-            <span data-testid="evidence-doc-title">{data?.document_title || badge.document_title || ""}</span>
+            <span data-testid="checkfix-evidence-doc-title">{data?.document_title || badge.document_title || ""}</span>
             {(data?.page || badge.page) ? <span>· hal. {data?.page || badge.page}</span> : null}
           </div>
           <blockquote
-            data-testid="evidence-quote"
+            data-testid="checkfix-evidence-quote"
             className="border-l-2 border-[color:var(--jm-text)] pl-3 font-reading text-sm leading-relaxed text-[color:var(--jm-text)]"
           >
             &ldquo;{data?.text || badge.quote || "(kutipan tidak tersedia)"}&rdquo;
@@ -76,7 +68,7 @@ export default function EvidenceDetector({ projectId, badge }) {
           )}
           {data?.document_id && (
             <Link
-              data-testid="evidence-open-baca"
+              data-testid="checkfix-evidence-open-baca"
               to={`/project/${projectId}/doc/${data.document_id}`}
               className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-md text-xs font-semibold font-ui bg-[color:var(--jm-text)] text-[color:var(--jm-bg)] hover:opacity-90"
             >
