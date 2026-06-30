@@ -12,6 +12,10 @@ export const api = {
   createProject: (payload) => http.post("/projects", payload).then((r) => r.data),
   deleteProject: (id) => http.delete(`/projects/${id}`).then((r) => r.data),
 
+  // settings
+  getSettings: () => http.get("/settings").then((r) => r.data),
+  updateSettings: (patch) => http.put("/settings", patch).then((r) => r.data),
+
   // documents
   listDocuments: (projectId) =>
     http.get(`/projects/${projectId}/documents`).then((r) => r.data),
@@ -27,11 +31,18 @@ export const api = {
   getDocument: (id) => http.get(`/documents/${id}`).then((r) => r.data),
   deleteDocument: (id) => http.delete(`/documents/${id}`).then((r) => r.data),
   getSummary: (id) => http.get(`/documents/${id}/summary`).then((r) => r.data),
+  getStatus: (id) => http.get(`/documents/${id}/status`).then((r) => r.data),
+  resummarize: (id, model, personaOverride = null) =>
+    http
+      .post(`/documents/${id}/summarize${model ? `?model=${encodeURIComponent(model)}` : ""}`, personaOverride || {})
+      .then((r) => r.data),
   pdfUrl: (id) => `${API}/documents/${id}/pdf`,
 
   // evidence
   evidenceForClaim: (claimId) =>
     http.post(`/claims/${claimId}/evidence`).then((r) => r.data),
+  evidenceForSection: (docId, text) =>
+    http.post(`/documents/${docId}/section-evidence`, { text }).then((r) => r.data),
 
   // outliers
   outliers: (projectId) =>

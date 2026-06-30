@@ -44,8 +44,48 @@ class DocumentMeta(BaseModel):
     error: Optional[str] = None
     page_count: int = 0
     title: Optional[str] = None
-    summary: Optional[str] = None  # short paragraph
+    summary: Optional[str] = None  # short overview paragraph (legacy)
+    sections: Optional[dict] = None  # {abstract, objective, method, results, conclusion}
+    model_used: Optional[str] = None  # which LLM produced the current summary
+    persona_used: Optional[str] = None
     uploaded_at: str = Field(default_factory=utcnow_iso)
+
+
+# ----- Settings -----
+PERSONAS = {
+    "akademisi_ketat": {
+        "label": "Akademisi Ketat",
+        "prompt": "Anda adalah asisten akademik yang sangat presisi. Gunakan bahasa Indonesia formal. Jangan menambahkan interpretasi di luar teks sumber. Setiap klaim wajib merujuk ke kalimat spesifik di paper. Jika tidak ada bukti, katakan 'tidak ditemukan dalam teks'.",
+    },
+    "penjelasan_sederhana": {
+        "label": "Penjelasan Sederhana",
+        "prompt": "Anda adalah tutor yang menjelaskan riset kompleks dengan bahasa sederhana, analogi sehari-hari, dan contoh konkret. Akurasi tetap utama, tetapi gaya bahasa lebih santai dan mudah dipahami mahasiswa S1.",
+    },
+    "penulis_cepat": {
+        "label": "Penulis Cepat",
+        "prompt": "Anda adalah asisten penulisan efisien. Ringkasan padat maksimal 3 kalimat per bagian. Langsung ke poin utama tanpa basa-basi. Gaya semi-formal.",
+    },
+}
+
+
+class Settings(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+    id: str = "singleton"
+    theme: Literal["light", "dark"] = "light"
+    persona_id: str = "akademisi_ketat"
+    persona_custom: str = ""
+    # API keys (optional override; if empty, falls back to EMERGENT_LLM_KEY)
+    gemini_key: str = ""
+    openai_key: str = ""
+    anthropic_key: str = ""
+    default_provider: str = "gemini"
+    default_model: str = "gemini-3-flash-preview"
+
+
+class AvailableModel(BaseModel):
+    id: str  # e.g. "gemini-3-flash-preview"
+    provider: str  # "gemini" / "openai" / "anthropic"
+    label: str  # human-friendly
 
 
 class Sentence(BaseModel):

@@ -3,11 +3,11 @@ from __future__ import annotations
 
 from typing import List, Dict, Any
 
-from .llm import generate_json
+from .llm import generate_json, persona_prefix
 from .retrieval import build_bm25, top_k
 
 
-SYSTEM = (
+BASE_SYSTEM = (
     "You are JurnalMap's evidence tracker. Given a CLAIM and a list of CANDIDATE sentences "
     "from a scientific paper, decide for each candidate whether it SUPPORTS the claim. "
     "You report evidence; you do not judge truth. Be strict: explicit support = high, "
@@ -15,7 +15,15 @@ SYSTEM = (
 )
 
 
-async def find_evidence(claim_text: str, sentences: List[Dict[str, Any]], k: int = 5) -> List[Dict[str, Any]]:
+async def find_evidence(
+    claim_text: str,
+    sentences,
+    k: int = 5,
+    *,
+    user_settings=None,
+    provider=None,
+    model=None,
+):
     """Return list of evidence items with tier (high/medium/low), score, rationale.
 
     sentences items must have keys: id, text, page, x0, y0, x1, y1, page_width, page_height.
@@ -46,7 +54,14 @@ async def find_evidence(claim_text: str, sentences: List[Dict[str, Any]], k: int
     )
 
     try:
-        verdicts = await generate_json(f"ev-{claim_text[:32]}", SYSTEM, user)
+        verdicts = await generate_json(
+            f"ev-{claim_text[:32]}",
+            persona_prefix(user_settings) + BASE_SYSTEM,
+            user,
+            provider=provider,
+            model=model,
+            user_settings=user_settings,
+        )
     except Exception:
         verdicts = []
     if not isinstance(verdicts, list):

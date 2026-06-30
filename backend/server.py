@@ -42,14 +42,17 @@ from app.models.schemas import (
     AskRequest,
     AskResponse,
     Citation,
+    Settings,
+    PERSONAS,
     new_uid,
     utcnow_iso,
 )
-from app.services.document_processor import process_document
+from app.services.document_processor import process_document, regenerate_summary
 from app.services.evidence_service import find_evidence
 from app.services.outlier_service import compute_outliers
 from app.services.matrix_service import extract_row
 from app.services.qa_service import answer_question
+from app.services.llm import split_provider_model, emergent_key, default_model
 
 
 UPLOAD_DIR = Path(os.environ.get("UPLOAD_DIR", str(ROOT_DIR / "uploads")))
@@ -169,7 +172,18 @@ async def upload_document(
     meta = DocumentMeta(id=doc_id, project_id=project_id, filename=file.filename, status="processing")
     await db.documents.insert_one(meta.model_dump())
 
-    background_tasks.add_task(process_document, db, doc_id, str(dest))
+    settings = await _load_settings()
+    model_id = settings.get("default_model") or default_model()
+    provider, model_id = split_provider_model(model_id)
+    background_tasks.add_task(
+        process_document,
+        db,
+        doc_id,
+        str(dest),
+        user_settings=settings,
+        provider=provider,
+        model=model_id,
+    )
     return meta
 
 
@@ -204,6 +218,91 @@ async def serve_pdf(document_id: str):
     return FileResponse(str(fp), media_type="application/pdf")
 
 
+async def _load_settings() -> dict:
+    """Load the singleton settings doc, falling back to defaults."""
+    doc = await db.settings.find_one({"id": "singleton"}, {"_id": 0})
+    if not doc:
+        doc = Settings().model_dump()
+    return doc
+
+
+def _models_for(settings: dict) -> list[dict]:
+    """Return the list of models the user can pick. Always include Emergent defaults."""
+    models = []
+    # Emergent key always works (chat-only for gemini/openai/anthropic)
+    if emergent_key():
+        models += [
+            {"id": "gemini-3-flash-preview", "provider": "gemini", "label": "Gemini 3 Flash (Emergent)"},
+            {"id": "gemini-2.5-pro", "provider": "gemini", "label": "Gemini 2.5 Pro (Emergent)"},
+            {"id": "gpt-5.4-mini", "provider": "openai", "label": "GPT-5.4 Mini (Emergent)"},
+            {"id": "claude-haiku-4-5", "provider": "anthropic", "label": "Claude Haiku 4.5 (Emergent)"},
+        ]
+    if settings.get("gemini_key"):
+        models.append({"id": "gemini-3-flash-preview", "provider": "gemini", "label": "Gemini 3 Flash (Your key)"})
+        models.append({"id": "gemini-2.5-pro", "provider": "gemini", "label": "Gemini 2.5 Pro (Your key)"})
+    if settings.get("openai_key"):
+        models.append({"id": "gpt-4o-mini", "provider": "openai", "label": "GPT-4o Mini (Your key)"})
+        models.append({"id": "gpt-4o", "provider": "openai", "label": "GPT-4o (Your key)"})
+    if settings.get("anthropic_key"):
+        models.append({"id": "claude-sonnet-4-5", "provider": "anthropic", "label": "Claude Sonnet 4.5 (Your key)"})
+    # de-dup keeping first occurrence
+    seen = set()
+    out = []
+    for m in models:
+        key = (m["provider"], m["id"], m["label"])
+        if key in seen:
+            continue
+        seen.add(key)
+        out.append(m)
+    return out
+
+
+def _mask(value: str | None) -> str:
+    if not value:
+        return ""
+    if len(value) <= 8:
+        return "***"
+    return value[:4] + "***" + value[-4:]
+
+
+# ---- Settings ----
+@api.get("/settings")
+async def get_settings():
+    s = await _load_settings()
+    return {
+        "theme": s.get("theme", "light"),
+        "persona_id": s.get("persona_id", "akademisi_ketat"),
+        "persona_custom": s.get("persona_custom", ""),
+        "default_model": s.get("default_model") or default_model(),
+        # masked keys for display
+        "gemini_key_masked": _mask(s.get("gemini_key")),
+        "openai_key_masked": _mask(s.get("openai_key")),
+        "anthropic_key_masked": _mask(s.get("anthropic_key")),
+        "has_gemini_key": bool(s.get("gemini_key")),
+        "has_openai_key": bool(s.get("openai_key")),
+        "has_anthropic_key": bool(s.get("anthropic_key")),
+        "personas": [{"id": k, "label": v["label"]} for k, v in PERSONAS.items()] + [{"id": "custom", "label": "Custom"}],
+        "available_models": _models_for(s),
+    }
+
+
+@api.put("/settings")
+async def update_settings(payload: dict = Body(...)):
+    s = await _load_settings()
+    # Only update keys we know about
+    for k in ("theme", "persona_id", "persona_custom", "default_model"):
+        if k in payload and payload[k] is not None:
+            s[k] = payload[k]
+    # Keys: empty string means "clear it"; missing field means "keep as-is"
+    for k in ("gemini_key", "openai_key", "anthropic_key"):
+        if k in payload:
+            v = (payload.get(k) or "").strip()
+            s[k] = v
+    s["id"] = "singleton"
+    await db.settings.update_one({"id": "singleton"}, {"$set": s}, upsert=True)
+    return await get_settings()
+
+
 @api.get("/documents/{document_id}/summary")
 async def get_summary(document_id: str):
     d = await _document_or_404(document_id)
@@ -214,9 +313,56 @@ async def get_summary(document_id: str):
         "filename": d.get("filename"),
         "page_count": d.get("page_count", 0),
         "summary": d.get("summary") or "",
+        "sections": d.get("sections") or {},
+        "model_used": d.get("model_used"),
+        "persona_used": d.get("persona_used"),
         "claims": claims,
         "status": d.get("status"),
+        "error": d.get("error"),
     }
+
+
+@api.get("/documents/{document_id}/status")
+async def get_status(document_id: str):
+    """Status endpoint that returns processing state + structured summary when ready."""
+    d = await _document_or_404(document_id)
+    claims = await db.claims.find({"document_id": document_id}, {"_id": 0}).sort("idx", 1).to_list(50)
+    return {
+        "id": document_id,
+        "status": d.get("status"),
+        "error": d.get("error"),
+        "page_count": d.get("page_count", 0),
+        "title": d.get("title") or d.get("filename"),
+        "summary": {
+            "overview": d.get("summary") or "",
+            **(d.get("sections") or {}),
+        } if d.get("status") == "ready" else None,
+        "claims": claims if d.get("status") == "ready" else [],
+        "model_used": d.get("model_used"),
+        "persona_used": d.get("persona_used"),
+    }
+
+
+@api.post("/documents/{document_id}/summarize")
+async def resummarize(document_id: str, model: Optional[str] = None, payload: dict = Body(default={})):
+    """Regenerate summary with chosen model. Body may override persona for this single call."""
+    await _document_or_404(document_id)
+    settings = await _load_settings()
+    # allow persona override for this single call
+    if isinstance(payload, dict) and payload.get("persona_id"):
+        settings = {**settings, "persona_id": payload["persona_id"]}
+        if "persona_custom" in payload:
+            settings["persona_custom"] = payload.get("persona_custom") or ""
+    model_id = model or settings.get("default_model") or default_model()
+    provider, model_id = split_provider_model(model_id)
+    await regenerate_summary(
+        db,
+        document_id,
+        user_settings=settings,
+        provider=provider,
+        model=model_id,
+    )
+    return await get_summary(document_id)
 
 
 # ---- Evidence ----
@@ -226,12 +372,34 @@ async def evidence_for_claim(claim_id: str):
     if not claim:
         raise HTTPException(404, "Claim not found")
     sentences = await db.sentences.find({"document_id": claim["document_id"]}, {"_id": 0}).sort("idx", 1).to_list(5000)
-    items = await find_evidence(claim["text"], sentences, k=5)
+    settings = await _load_settings()
+    provider, model_id = split_provider_model(settings.get("default_model") or default_model())
+    items = await find_evidence(
+        claim["text"], sentences, k=5,
+        user_settings=settings, provider=provider, model=model_id,
+    )
     return EvidenceResponse(
         claim_id=claim_id,
         claim_text=claim["text"],
         items=[EvidenceItem(**i) for i in items],
     )
+
+
+@api.post("/documents/{document_id}/section-evidence")
+async def evidence_for_section(document_id: str, payload: dict = Body(...)):
+    """Find evidence in a doc for arbitrary text (used by section-click in SummaryPanel)."""
+    await _document_or_404(document_id)
+    text = (payload.get("text") or "").strip()
+    if not text:
+        raise HTTPException(400, "text is required")
+    sentences = await db.sentences.find({"document_id": document_id}, {"_id": 0}).sort("idx", 1).to_list(5000)
+    settings = await _load_settings()
+    provider, model_id = split_provider_model(settings.get("default_model") or default_model())
+    items = await find_evidence(
+        text, sentences, k=5,
+        user_settings=settings, provider=provider, model=model_id,
+    )
+    return {"text": text, "items": items}
 
 
 # ---- Outliers ----
@@ -268,7 +436,12 @@ async def build_matrix(
             row = {"document_id": d["id"], "title": title, "cells": cached["cells"]}
         else:
             sents = await db.sentences.find({"document_id": d["id"]}, {"_id": 0}).to_list(5000)
-            row = await extract_row(d["id"], title, sents)
+            settings_doc = await _load_settings()
+            provider, model_id = split_provider_model(settings_doc.get("default_model") or default_model())
+            row = await extract_row(
+                d["id"], title, sents,
+                user_settings=settings_doc, provider=provider, model=model_id,
+            )
             # persist
             await db.matrix_cache.update_one(
                 {"document_id": d["id"]},
@@ -291,7 +464,7 @@ async def build_matrix(
 
 # ---- Ask Library ----
 @api.post("/projects/{project_id}/ask", response_model=AskResponse)
-async def ask_library(project_id: str, payload: AskRequest):
+async def ask_library(project_id: str, payload: AskRequest, model: Optional[str] = None):
     await _project_or_404(project_id)
     if not payload.question.strip():
         raise HTTPException(400, "question must not be empty")
@@ -300,7 +473,13 @@ async def ask_library(project_id: str, payload: AskRequest):
     for d in docs:
         sents = await db.sentences.find({"document_id": d["id"]}, {"_id": 0}).to_list(5000)
         inputs.append({"id": d["id"], "title": d.get("title") or d.get("filename"), "sentences": sents})
-    res = await answer_question(payload.question, inputs)
+    settings = await _load_settings()
+    model_id = model or settings.get("default_model") or default_model()
+    provider, model_id = split_provider_model(model_id)
+    res = await answer_question(
+        payload.question, inputs,
+        user_settings=settings, provider=provider, model=model_id,
+    )
     return AskResponse(
         question=res["question"],
         answer=res["answer"],

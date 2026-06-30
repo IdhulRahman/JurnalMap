@@ -3,11 +3,11 @@ from __future__ import annotations
 
 from typing import List, Dict, Any
 
-from .llm import generate_json
+from .llm import generate_json, persona_prefix
 from .summary_service import _condense
 
 
-SYSTEM = (
+BASE_SYSTEM = (
     "You are JurnalMap's comparison assistant. You extract structured fields from a journal "
     "to enable side-by-side comparison. You do NOT decide which paper is better. You only "
     "report what is in the text. If a field is not present, return 'tidak disebutkan'."
@@ -22,7 +22,15 @@ DEFAULT_FIELDS = [
 ]
 
 
-async def extract_row(document_id: str, title: str, sentences: List[Dict[str, Any]]) -> Dict[str, Any]:
+async def extract_row(
+    document_id: str,
+    title: str,
+    sentences,
+    *,
+    user_settings=None,
+    provider=None,
+    model=None,
+):
     if not sentences:
         return {"document_id": document_id, "title": title or "Untitled", "cells": []}
 
@@ -42,7 +50,14 @@ async def extract_row(document_id: str, title: str, sentences: List[Dict[str, An
         "Respond in the same language as the article."
     )
 
-    data = await generate_json(f"mat-{document_id}", SYSTEM, user)
+    data = await generate_json(
+        f"mat-{document_id}",
+        persona_prefix(user_settings) + BASE_SYSTEM,
+        user,
+        provider=provider,
+        model=model,
+        user_settings=user_settings,
+    )
     if not isinstance(data, dict):
         data = {}
     cells = []

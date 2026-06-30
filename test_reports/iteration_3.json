@@ -1,0 +1,79 @@
+{
+  "summary": "Iteration 3 — backend pytest 10/11 PASS (one LLM-JSON-parsing 500 on resummarize with gpt-5.4-mini), full Settings + SummaryPanel + section-evidence UI verified end-to-end via Playwright. Structured per-document summary (overview + abstract/objective/method/results/conclusion) populated and exposed by both /api/documents/{id}/status and /api/documents/{id}/summary. Persona override on /summarize works without mutating global settings. Section-card click shows 5 PDF highlights on /project/.../doc/...",
+  "backend_issues": {
+    "critical": [
+      {
+        "endpoint": "POST /api/documents/{id}/summarize?model=gpt-5.4-mini",
+        "issue": "Returns 500 because llm.generate_json() can't parse the raw response (json.JSONDecodeError: Expecting ',' delimiter at line 51 col 2). The fallback regex match.group(0) also fails. Re-summarising the SAME doc with another model (e.g. claude-haiku-4-5 or gemini-2.5-pro) works. Issue is brittle JSON parsing when gpt-5.4-mini returns prose / unescaped strings inside JSON. Recommend: wrap json.loads in try/except → return a clear 502 with the model id, OR call generate_json with a stricter response_format / a small repair pass. Currently the user just sees a 500.",
+        "priority": "HIGH"
+      }
+    ],
+    "minor": []
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": []
+  },
+  "feature_verification": {
+    "structured_summary_p1": {
+      "status": "PASS",
+      "details": "GET /status returns summary={overview,abstract,objective,method,results,conclusion} each ≥10 chars when status='ready'. GET /summary returns sections={abstract,objective,method,results,conclusion} + model_used. Verified on a fresh PyMuPDF PDF that explicitly labels every section."
+    },
+    "settings_page": {
+      "status": "PASS",
+      "details": "/settings loads. settings-heading + theme/keys/persona/model sections render. theme-dark-btn adds class='dark' to <html>, theme-light-btn removes it. localStorage['jurnalmap.theme'] is set. Reload preserves theme via SettingsProvider."
+    },
+    "api_keys": {
+      "status": "PASS",
+      "details": "Filling gemini-key-input + openai-key-input + anthropic-key-input then settings-save-btn -> PUT /api/settings -> GET /api/settings returns has_gemini_key:true, has_openai_key:true, has_anthropic_key:true with masked previews. gemini-key-clear-btn flips has_gemini_key to false."
+    },
+    "persona_dropdown": {
+      "status": "PASS",
+      "details": "persona-select shows 4 options (akademisi_ketat, penjelasan_sederhana, penulis_cepat, custom). Selecting 'custom' reveals persona-custom-input. PUT /api/settings persists persona_id+persona_custom. POST /summarize with body {persona_id:'penjelasan_sederhana'} returns persona_used='penjelasan_sederhana' and global persona_id is unchanged."
+    },
+    "default_model_select": {
+      "status": "PASS",
+      "details": "default-model-select lists Emergent defaults (gemini-3-flash-preview, gemini-2.5-pro, gpt-5.4-mini, claude-haiku-4-5). PUT default_model='gemini-2.5-pro' -> GET returns it."
+    },
+    "summary_panel_model_bar_and_resummarize": {
+      "status": "PARTIAL",
+      "details": "summary-model-bar + summary-model-select + resummarize-btn all visible in DocumentReader. summary-model-select opens with 4 summary-model-option-<id> entries matching the Emergent defaults. resummarize-btn fires POST /api/documents/{id}/summarize?model=... ; claim ids are regenerated and sections re-populated when the model returns valid JSON. With model=gpt-5.4-mini the request returns 500 due to bad-JSON parsing (see backend critical issue). The two other non-default models (gemini-2.5-pro, claude-haiku-4-5) succeeded."
+    },
+    "section_click_highlight": {
+      "status": "PASS",
+      "details": "Clicking section-card-results triggered POST /api/documents/{id}/section-evidence and rendered 5 highlight rectangles (data-testid='highlight-<tier>') over the PDF in the left pane. Verified visually + via DOM query."
+    },
+    "regression": {
+      "status": "PASS",
+      "details": "Existing 11 e2e cases in test_jurnalmap_api.py untouched; outliers/matrix/ask/evidence still work."
+    }
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_iteration3.py",
+    "/app/test_reports/pytest/iteration3.xml",
+    "/app/backend/tests/test_jurnalmap_api.py",
+    "/app/backend/tests/test_targeted_fixes.py"
+  ],
+  "action_items": [
+    "FIX: llm.generate_json() must handle LLM responses that aren't valid JSON. Currently a bad reply from gpt-5.4-mini bubbles up as HTTP 500 from POST /api/documents/{id}/summarize?model=gpt-5.4-mini. Suggestions: (a) catch json.JSONDecodeError and return HTTPException(502, 'LLM returned malformed JSON, please retry'); (b) add a stricter system prompt / response_format=json_object where supported; (c) attempt a json.loads on a sanitised string (escape unescaped quotes, trim trailing commas) before giving up."
+  ],
+  "critical_code_review_comments": [
+    "server.py resummarize endpoint passes user_settings dict that may include the persona override but does not deep-copy before mutating (uses {**settings, ...}) — safe, no issue.",
+    "summary endpoint correctly merges overview+sections in /status when ready and returns None otherwise — good shape for the UI.",
+    "Settings PUT correctly distinguishes 'empty string = clear' vs 'missing key = keep' for the three API keys — good UX.",
+    "llm.generate_json brittle to non-JSON LLM output — single critical bug (see action items).",
+    "PDF highlight overlay relies on /api/documents/{id}/section-evidence which is fast — UX is snappy. Five highlights render within ~2s.",
+    "Section card displays both label + body text. data-testid coverage is excellent across the new UI."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_iteration3.py (new — 11 pytest cases, JUnit XML at /app/test_reports/pytest/iteration3.xml)"
+  ],
+  "success_rate": {"backend": "91% (10/11 pytest in iter3 suite; the one failure is the LLM-JSON-500 from gpt-5.4-mini)", "frontend": "100% of probed flows (settings page, theme toggle, key save+clear, persona custom, model dropdown, section-card highlight overlay, resummarize-btn)"},
+  "test_credentials": "N/A — single-user app, no auth.",
+  "seed_data_creation": "/tmp/jm_iter3_sectioned.pdf — single-page PyMuPDF PDF with explicit Abstract/Objective/Methods/Results/Conclusion blocks. Module-scoped pytest fixture creates 'TEST_iter3' project and uploads it; cleanup via fixture teardown deletes the project. UI tests reused the already-ready document in project 'PBL study' (id e16c6c7c…) — no new seed needed.",
+  "retest_needed": true,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "All new iter3 endpoints + UI verified. ONLY remaining concern: gpt-5.4-mini occasionally returns non-JSON which surfaces as a 500 from POST /summarize?model=gpt-5.4-mini. After main agent hardens llm.generate_json (catch JSONDecodeError + return 502 OR repair JSON), re-run /app/backend/tests/test_iteration3.py — specifically TestResummarize::test_resummarize_with_different_model. Other models work; the bug is isolated to flaky JSON output, not the resummarize flow itself.",
+  "rca of the issue": "POST /api/documents/{id}/summarize?model=gpt-5.4-mini -> server.py:358 calls regenerate_summary -> summary_service.py:79 calls generate_json which json.loads() the raw LLM response. gpt-5.4-mini returned text with unescaped characters around line 51 col 2 (char 2643). The regex fallback re.search(r'\\{.*\\}', raw, DOTALL) caught the outer braces but the same JSONDecodeError repeats. There is no try/except around the second json.loads, so a 500 bubbles up to the user. Mitigation: wrap second json.loads in try/except, return HTTPException(502, 'LLM returned malformed JSON for model {model_id}, try another model'). Long-term: use a strict response_format / explicit json schema, or a sanitiser pass."
+}

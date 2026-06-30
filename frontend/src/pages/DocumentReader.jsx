@@ -77,11 +77,18 @@ export default function DocumentReader() {
             <div className="p-6 text-sm text-[color:var(--jm-text-3)] font-ui">Memuat ringkasan…</div>
           ) : (
             <SummaryPanel
+              docId={docId}
               summary={summary.summary}
+              sections={summary.sections || {}}
+              modelUsed={summary.model_used}
               claims={summary.claims || []}
               onHighlight={(items, jump) => {
                 setHighlights(items);
                 if (jump) setJumpTo(jump);
+              }}
+              onResummarized={(r) => {
+                // refresh summary fields
+                api.getSummary(docId).then(setSummary).catch(() => {});
               }}
             />
           )}

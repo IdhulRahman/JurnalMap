@@ -4,11 +4,11 @@ from __future__ import annotations
 from typing import List, Dict, Any
 import uuid
 
-from .llm import generate_json
+from .llm import generate_json, persona_prefix
 from .retrieval import build_bm25, top_k
 
 
-SYSTEM = (
+BASE_SYSTEM = (
     "You are JurnalMap's literature assistant. You answer questions strictly based on "
     "the provided excerpts from multiple journal articles. You ALWAYS cite the source "
     "by ID (S0, S1, ...). If the excerpts are insufficient, say so plainly. You report "
@@ -18,10 +18,14 @@ SYSTEM = (
 
 async def answer_question(
     question: str,
-    documents: List[Dict[str, Any]],
+    documents,
     top_per_doc: int = 4,
     max_total: int = 12,
-) -> Dict[str, Any]:
+    *,
+    user_settings=None,
+    provider=None,
+    model=None,
+):
     """documents: [{id, title, sentences:[{id,text,page,...}]}]."""
     # Gather top-K per doc, then merge by score
     gathered: List[Dict[str, Any]] = []
@@ -68,7 +72,14 @@ async def answer_question(
     )
 
     try:
-        data = await generate_json(f"qa-{uuid.uuid4().hex[:8]}", SYSTEM, user)
+        data = await generate_json(
+            f"qa-{uuid.uuid4().hex[:8]}",
+            persona_prefix(user_settings) + BASE_SYSTEM,
+            user,
+            provider=provider,
+            model=model,
+            user_settings=user_settings,
+        )
     except Exception:
         data = {}
     if not isinstance(data, dict):
