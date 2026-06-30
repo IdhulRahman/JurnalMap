@@ -6,9 +6,11 @@ import { toast } from "sonner";
 import Header from "@/components/Header";
 import PdfViewer from "@/components/PdfViewer";
 import SummaryPanel from "@/components/SummaryPanel";
+import { useT } from "@/lib/useT";
 
 export default function DocumentReader() {
   const { projectId, docId } = useParams();
+  const { t } = useT();
   const [summary, setSummary] = useState(null);
   const [highlights, setHighlights] = useState([]);
   const [jumpTo, setJumpTo] = useState(null);
@@ -38,7 +40,7 @@ export default function DocumentReader() {
             to={`/project/${projectId}`}
             className="flex items-center gap-1.5 text-xs uppercase tracking-[0.2em] font-semibold text-[color:var(--jm-text-3)] hover:text-[color:var(--jm-text)] transition-colors"
           >
-            <ArrowLeft className="w-3.5 h-3.5" /> Kembali ke Proyek
+            <ArrowLeft className="w-3.5 h-3.5" /> {t("reader.back")}
           </Link>
           <div className="w-px h-5 bg-[color:var(--jm-border)]" />
           <div
@@ -81,13 +83,13 @@ export default function DocumentReader() {
               summary={summary.summary}
               sections={summary.sections || {}}
               modelUsed={summary.model_used}
+              personaUsed={summary.persona_used}
               claims={summary.claims || []}
               onHighlight={(items, jump) => {
                 setHighlights(items);
                 if (jump) setJumpTo(jump);
               }}
-              onResummarized={(r) => {
-                // refresh summary fields
+              onResummarized={() => {
                 api.getSummary(docId).then(setSummary).catch(() => {});
               }}
             />

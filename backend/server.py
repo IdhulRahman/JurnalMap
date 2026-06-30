@@ -44,13 +44,14 @@ from app.models.schemas import (
     Citation,
     Settings,
     PERSONAS,
+    MATRIX_METHODS,
     new_uid,
     utcnow_iso,
 )
 from app.services.document_processor import process_document, regenerate_summary
 from app.services.evidence_service import find_evidence
 from app.services.outlier_service import compute_outliers
-from app.services.matrix_service import extract_row
+from app.services.matrix_service import extract_row, fields_for
 from app.services.qa_service import answer_question
 from app.services.llm import split_provider_model, emergent_key, default_model, LLMJSONError
 
@@ -174,7 +175,7 @@ async def upload_document(
 
     settings = await _load_settings()
     model_id = settings.get("default_model") or default_model()
-    provider, model_id = split_provider_model(model_id)
+    provider, model_id = split_provider_model(model_id, settings)
     background_tasks.add_task(
         process_document,
         db,
@@ -229,7 +230,6 @@ async def _load_settings() -> dict:
 def _models_for(settings: dict) -> list[dict]:
     """Return the list of models the user can pick. Always include Emergent defaults."""
     models = []
-    # Emergent key always works (chat-only for gemini/openai/anthropic)
     if emergent_key():
         models += [
             {"id": "gemini-3-flash-preview", "provider": "gemini", "label": "Gemini 3 Flash (Emergent)"},
@@ -245,7 +245,12 @@ def _models_for(settings: dict) -> list[dict]:
         models.append({"id": "gpt-4o", "provider": "openai", "label": "GPT-4o (Your key)"})
     if settings.get("anthropic_key"):
         models.append({"id": "claude-sonnet-4-5", "provider": "anthropic", "label": "Claude Sonnet 4.5 (Your key)"})
-    # de-dup keeping first occurrence
+    if settings.get("local_endpoint") and settings.get("local_model"):
+        models.append({
+            "id": settings["local_model"],
+            "provider": "local",
+            "label": f"{settings['local_model']} (Local)",
+        })
     seen = set()
     out = []
     for m in models:
@@ -273,6 +278,8 @@ async def get_settings():
         "theme": s.get("theme", "light"),
         "persona_id": s.get("persona_id", "akademisi_ketat"),
         "persona_custom": s.get("persona_custom", ""),
+        "output_language": s.get("output_language", "en"),
+        "ui_language": s.get("ui_language", "id"),
         "default_model": s.get("default_model") or default_model(),
         # masked keys for display
         "gemini_key_masked": _mask(s.get("gemini_key")),
@@ -281,7 +288,13 @@ async def get_settings():
         "has_gemini_key": bool(s.get("gemini_key")),
         "has_openai_key": bool(s.get("openai_key")),
         "has_anthropic_key": bool(s.get("anthropic_key")),
+        # local endpoint
+        "local_endpoint": s.get("local_endpoint", ""),
+        "local_api_key_masked": _mask(s.get("local_api_key")) if s.get("local_api_key") and s.get("local_api_key") != "ollama" else "",
+        "local_model": s.get("local_model", ""),
+        "has_local": bool(s.get("local_endpoint") and s.get("local_model")),
         "personas": [{"id": k, "label": v["label"]} for k, v in PERSONAS.items()] + [{"id": "custom", "label": "Custom"}],
+        "matrix_methods": [{"id": k, "label": v["label"]} for k, v in MATRIX_METHODS.items()],
         "available_models": _models_for(s),
     }
 
@@ -289,12 +302,14 @@ async def get_settings():
 @api.put("/settings")
 async def update_settings(payload: dict = Body(...)):
     s = await _load_settings()
-    # Only update keys we know about
-    for k in ("theme", "persona_id", "persona_custom", "default_model"):
+    for k in (
+        "theme", "persona_id", "persona_custom",
+        "output_language", "ui_language",
+        "default_model", "local_endpoint", "local_model",
+    ):
         if k in payload and payload[k] is not None:
             s[k] = payload[k]
-    # Keys: empty string means "clear it"; missing field means "keep as-is"
-    for k in ("gemini_key", "openai_key", "anthropic_key"):
+    for k in ("gemini_key", "openai_key", "anthropic_key", "local_api_key"):
         if k in payload:
             v = (payload.get(k) or "").strip()
             s[k] = v
@@ -354,7 +369,7 @@ async def resummarize(document_id: str, model: Optional[str] = None, payload: di
         if "persona_custom" in payload:
             settings["persona_custom"] = payload.get("persona_custom") or ""
     model_id = model or settings.get("default_model") or default_model()
-    provider, model_id = split_provider_model(model_id)
+    provider, model_id = split_provider_model(model_id, settings)
     try:
         await regenerate_summary(
             db,
@@ -379,7 +394,7 @@ async def evidence_for_claim(claim_id: str):
         raise HTTPException(404, "Claim not found")
     sentences = await db.sentences.find({"document_id": claim["document_id"]}, {"_id": 0}).sort("idx", 1).to_list(5000)
     settings = await _load_settings()
-    provider, model_id = split_provider_model(settings.get("default_model") or default_model())
+    provider, model_id = split_provider_model(settings.get("default_model") or default_model(), settings)
     items = await find_evidence(
         claim["text"], sentences, k=5,
         user_settings=settings, provider=provider, model=model_id,
@@ -400,7 +415,7 @@ async def evidence_for_section(document_id: str, payload: dict = Body(...)):
         raise HTTPException(400, "text is required")
     sentences = await db.sentences.find({"document_id": document_id}, {"_id": 0}).sort("idx", 1).to_list(5000)
     settings = await _load_settings()
-    provider, model_id = split_provider_model(settings.get("default_model") or default_model())
+    provider, model_id = split_provider_model(settings.get("default_model") or default_model(), settings)
     items = await find_evidence(
         text, sentences, k=5,
         user_settings=settings, provider=provider, model=model_id,
@@ -427,8 +442,11 @@ async def build_matrix(
     project_id: str,
     document_ids: Optional[List[str]] = Body(default=None, embed=True),
     refresh: bool = Body(default=False, embed=True),
+    method: str = Body(default="default", embed=True),
 ):
     await _project_or_404(project_id)
+    if method not in MATRIX_METHODS:
+        method = "default"
     query = {"project_id": project_id, "status": "ready"}
     if document_ids:
         query["id"] = {"$in": document_ids}
@@ -437,22 +455,28 @@ async def build_matrix(
     fields: List[str] = []
     for d in docs:
         title = d.get("title") or d.get("filename")
-        cached = None if refresh else await db.matrix_cache.find_one({"document_id": d["id"]}, {"_id": 0})
+        cache_key = {"document_id": d["id"], "method": method}
+        cached = None if refresh else await db.matrix_cache.find_one(cache_key, {"_id": 0})
         if cached and isinstance(cached.get("cells"), list) and cached["cells"]:
             row = {"document_id": d["id"], "title": title, "cells": cached["cells"]}
         else:
             sents = await db.sentences.find({"document_id": d["id"]}, {"_id": 0}).to_list(5000)
             settings_doc = await _load_settings()
-            provider, model_id = split_provider_model(settings_doc.get("default_model") or default_model())
-            row = await extract_row(
-                d["id"], title, sents,
-                user_settings=settings_doc, provider=provider, model=model_id,
-            )
+            provider, model_id = split_provider_model(settings_doc.get("default_model") or default_model(), settings_doc)
+            try:
+                row = await extract_row(
+                    d["id"], title, sents,
+                    user_settings=settings_doc, provider=provider, model=model_id,
+                    method=method,
+                )
+            except LLMJSONError as e:
+                raise HTTPException(502, f"Model returned malformed JSON for matrix ({e})")
             # persist
             await db.matrix_cache.update_one(
-                {"document_id": d["id"]},
+                cache_key,
                 {"$set": {
                     "document_id": d["id"],
+                    "method": method,
                     "title": title,
                     "cells": row["cells"],
                     "cached_at": utcnow_iso(),
@@ -464,7 +488,7 @@ async def build_matrix(
         rows.append(MatrixRow(document_id=row["document_id"], title=row["title"],
                               cells=[MatrixCell(**c) for c in row["cells"]]))
     if not fields:
-        fields = ["objective", "method", "sample", "key_finding", "limitation"]
+        fields = fields_for(method)
     return MatrixResponse(fields=fields, rows=rows)
 
 
@@ -481,7 +505,7 @@ async def ask_library(project_id: str, payload: AskRequest, model: Optional[str]
         inputs.append({"id": d["id"], "title": d.get("title") or d.get("filename"), "sentences": sents})
     settings = await _load_settings()
     model_id = model or settings.get("default_model") or default_model()
-    provider, model_id = split_provider_model(model_id)
+    provider, model_id = split_provider_model(model_id, settings)
     res = await answer_question(
         payload.question, inputs,
         user_settings=settings, provider=provider, model=model_id,

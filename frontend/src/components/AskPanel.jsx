@@ -3,8 +3,10 @@ import { Send, MessageSquareText, Loader2, FileSearch } from "lucide-react";
 import { api } from "@/services/api";
 import { toast } from "sonner";
 import EvidenceBadge from "@/components/EvidenceBadge";
+import { useT } from "@/lib/useT";
 
 export default function AskPanel({ projectId, docs }) {
+  const { t } = useT();
   const [q, setQ] = useState("");
   const [busy, setBusy] = useState(false);
   const [history, setHistory] = useState([]); // [{q, answer, citations, overall_tier}]
@@ -13,7 +15,7 @@ export default function AskPanel({ projectId, docs }) {
   const ask = async () => {
     if (!q.trim()) return;
     if (ready.length === 0) {
-      toast.error("Belum ada jurnal siap untuk ditanya.");
+      toast.error(t("ask.noReady"));
       return;
     }
     setBusy(true);
@@ -22,7 +24,7 @@ export default function AskPanel({ projectId, docs }) {
       setHistory((h) => [{ ...r }, ...h]);
       setQ("");
     } catch {
-      toast.error("Gagal mendapatkan jawaban");
+      toast.error("Failed");
     } finally {
       setBusy(false);
     }
@@ -31,15 +33,12 @@ export default function AskPanel({ projectId, docs }) {
   return (
     <section
       data-testid="ask-section"
-      className="rounded-xl bg-white border border-[color:var(--jm-border)] p-5"
+      className="rounded-xl bg-[color:var(--jm-surface)] border border-[color:var(--jm-border)] p-5"
     >
       <div className="flex items-center gap-2 text-[11px] uppercase tracking-[0.22em] font-semibold text-[color:var(--jm-text-3)] mb-3">
-        <MessageSquareText className="w-3.5 h-3.5" /> Tanya Pustaka — Lintas Jurnal
+        <MessageSquareText className="w-3.5 h-3.5" /> {t("ask.title")}
       </div>
-      <p className="text-sm text-[color:var(--jm-text-2)] font-ui mb-4">
-        Ajukan pertanyaan terbuka. JurnalMap akan mencari fragmen relevan dari semua jurnal
-        proyek ini, lalu menjawab dengan menyertakan sumber dan tingkat bukti.
-      </p>
+      <p className="text-sm text-[color:var(--jm-text-2)] font-ui mb-4">{t("ask.intro")}</p>
 
       <div className="flex gap-2">
         <input
@@ -47,24 +46,24 @@ export default function AskPanel({ projectId, docs }) {
           value={q}
           onChange={(e) => setQ(e.target.value)}
           onKeyDown={(e) => e.key === "Enter" && !busy && ask()}
-          placeholder="Misal: Bagaimana ukuran sampel mempengaruhi temuan?"
-          className="flex-1 px-4 py-3 rounded-lg border border-[color:var(--jm-border)] focus:border-[color:var(--jm-text)] focus:outline-none font-ui text-sm bg-white"
+          placeholder={t("ask.placeholder")}
+          className="flex-1 px-4 py-3 rounded-lg border border-[color:var(--jm-border)] focus:border-[color:var(--jm-text)] focus:outline-none font-ui text-sm bg-[color:var(--jm-surface)] text-[color:var(--jm-text)]"
         />
         <button
           data-testid="ask-submit"
           onClick={ask}
           disabled={busy || !q.trim()}
-          className="px-4 py-3 rounded-lg bg-[color:var(--jm-text)] text-white hover:bg-[#343a40] flex items-center gap-2 disabled:opacity-50 font-ui text-sm font-semibold"
+          className="px-4 py-3 rounded-lg bg-[color:var(--jm-text)] text-[color:var(--jm-bg)] hover:opacity-90 flex items-center gap-2 disabled:opacity-50 font-ui text-sm font-semibold"
         >
           {busy ? <Loader2 className="w-4 h-4 animate-spin" /> : <Send className="w-4 h-4" />}
-          Tanya
+          {t("ask.submit")}
         </button>
       </div>
 
       <div className="mt-6 space-y-5">
         {history.length === 0 && !busy && (
           <div className="rounded-lg border border-dashed border-[color:var(--jm-border)] p-8 text-center text-sm text-[color:var(--jm-text-3)] font-ui">
-            Belum ada percakapan. Pertanyaan dan jawaban Anda akan muncul di sini.
+            {t("ask.empty")}
           </div>
         )}
         {history.map((item, i) => (
@@ -75,9 +74,9 @@ export default function AskPanel({ projectId, docs }) {
           >
             <div className="flex items-center gap-2 mb-2">
               <span className="text-[10px] uppercase tracking-[0.2em] font-semibold text-[color:var(--jm-text-3)]">
-                Pertanyaan
+                {t("ask.question")}
               </span>
-              <EvidenceBadge tier={item.overall_tier} label={`Keseluruhan: ${item.overall_tier}`} />
+              <EvidenceBadge tier={item.overall_tier} label={`${t("ask.overall")}: ${item.overall_tier}`} />
             </div>
             <h4 className="font-display text-lg font-semibold text-[color:var(--jm-text)] leading-tight mb-3">
               {item.question}
@@ -88,14 +87,14 @@ export default function AskPanel({ projectId, docs }) {
             {item.citations.length > 0 && (
               <div className="mt-4 pt-4 border-t border-[color:var(--jm-border)]">
                 <div className="flex items-center gap-2 text-[10px] uppercase tracking-[0.2em] font-semibold text-[color:var(--jm-text-3)] mb-2">
-                  <FileSearch className="w-3 h-3" /> Sumber yang Dirujuk
+                  <FileSearch className="w-3 h-3" /> {t("ask.sources")}
                 </div>
                 <ul className="space-y-2">
                   {item.citations.map((c, ci) => (
                     <li
                       key={ci}
                       data-testid={`citation-${i}-${ci}`}
-                      className="rounded border border-[color:var(--jm-border)] bg-white p-2.5 flex items-start gap-3"
+                      className="rounded border border-[color:var(--jm-border)] bg-[color:var(--jm-surface)] p-2.5 flex items-start gap-3"
                     >
                       <EvidenceBadge tier={c.tier} compact testId={`cite-tier-${i}-${ci}`} />
                       <div className="flex-1 min-w-0">

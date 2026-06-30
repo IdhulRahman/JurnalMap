@@ -1,10 +1,19 @@
-"""Comparison matrix across multiple journals."""
+"""Comparison matrix across multiple journals.
+
+Supports multiple comparison methods (see app.models.schemas.MATRIX_METHODS):
+- default            Tujuan/Metode/Sampel/Temuan/Keterbatasan
+- gap_analysis       What is known / Gap / Why unresolved / Opportunity
+- method_comparison  Study design / Sampling / Data collection / Analysis / Validity
+- feature_comparison Features / Dataset / Evaluation metric / Performance
+- experimental_comparison  Hypothesis / Conditions / Controls / Results / Statistical test
+"""
 from __future__ import annotations
 
-from typing import List, Dict, Any
+from typing import Any, Dict, List
 
 from .llm import generate_json, persona_prefix
 from .summary_service import _condense
+from app.models.schemas import MATRIX_METHODS
 
 
 BASE_SYSTEM = (
@@ -13,13 +22,26 @@ BASE_SYSTEM = (
     "report what is in the text. If a field is not present, return 'tidak disebutkan'."
 )
 
-DEFAULT_FIELDS = [
-    "objective",
-    "method",
-    "sample",
-    "key_finding",
-    "limitation",
-]
+
+def fields_for(method: str) -> list[str]:
+    return list(MATRIX_METHODS.get(method, MATRIX_METHODS["default"])["fields"])
+
+
+def _user_prompt(title: str, source: str, fields: list[str]) -> str:
+    field_lines = "\n".join(
+        f'  "{f}": {{"value": "<short>", "excerpt": "<verbatim quote from source>", "page": <int or null>}},'
+        for f in fields
+    )
+    return (
+        f"Title: {title or '(untitled)'}\n\n"
+        f"Article text:\n---\n{source}\n---\n\n"
+        "Extract the following fields as a JSON object:\n"
+        "{\n"
+        + field_lines.rstrip(",")
+        + "\n}\n"
+        'Use "tidak disebutkan" for missing fields. Excerpt should quote the source as closely as possible. '
+        "Respond in the language requested by your system message."
+    )
 
 
 async def extract_row(
@@ -30,28 +52,17 @@ async def extract_row(
     user_settings=None,
     provider=None,
     model=None,
+    method: str = "default",
 ):
     if not sentences:
         return {"document_id": document_id, "title": title or "Untitled", "cells": []}
 
+    fields = fields_for(method)
     source = _condense(sentences, max_chars=10000)
-    user = (
-        f"Title: {title or '(untitled)'}\n\n"
-        f"Article text:\n---\n{source}\n---\n\n"
-        "Extract the following fields as a JSON object:\n"
-        "{\n"
-        '  "objective": {"value": "<short>", "excerpt": "<the exact sentence from the source>", "page": <int or null>},\n'
-        '  "method":    {"value": "<short>", "excerpt": "...", "page": null},\n'
-        '  "sample":    {"value": "<n, population>", "excerpt": "...", "page": null},\n'
-        '  "key_finding": {"value": "<short>", "excerpt": "...", "page": null},\n'
-        '  "limitation": {"value": "<short>", "excerpt": "...", "page": null}\n'
-        "}\n"
-        'Use "tidak disebutkan" for missing fields. Excerpt should quote the source as closely as possible. '
-        "Respond in the same language as the article."
-    )
+    user = _user_prompt(title, source, fields)
 
     data = await generate_json(
-        f"mat-{document_id}",
+        f"mat-{document_id}-{method}",
         persona_prefix(user_settings) + BASE_SYSTEM,
         user,
         provider=provider,
@@ -61,7 +72,7 @@ async def extract_row(
     if not isinstance(data, dict):
         data = {}
     cells = []
-    for field in DEFAULT_FIELDS:
+    for field in fields:
         entry = data.get(field) or {}
         if isinstance(entry, str):
             entry = {"value": entry}

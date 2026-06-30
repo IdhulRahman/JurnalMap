@@ -49,9 +49,9 @@ export const api = {
     http.get(`/projects/${projectId}/outliers`).then((r) => r.data),
 
   // matrix
-  matrix: (projectId, documentIds = null, refresh = false) =>
+  matrix: (projectId, documentIds = null, refresh = false, method = "default") =>
     http
-      .post(`/projects/${projectId}/matrix`, { document_ids: documentIds, refresh })
+      .post(`/projects/${projectId}/matrix`, { document_ids: documentIds, refresh, method })
       .then((r) => r.data),
 
   // ask

@@ -4,6 +4,7 @@ import * as d3 from "d3";
 import { Loader2, Compass, RefreshCw } from "lucide-react";
 import { api } from "@/services/api";
 import { toast } from "sonner";
+import { useT } from "@/lib/useT";
 
 export default function OutlierMap({ projectId, docs }) {
   const [data, setData] = useState(null);
@@ -12,6 +13,7 @@ export default function OutlierMap({ projectId, docs }) {
   const nav = useNavigate();
   const params = useParams();
   const pid = projectId || params?.id;
+  const { t } = useT();
 
   const load = async () => {
     if (!docs || docs.filter((d) => d.status === "ready").length === 0) {
@@ -78,7 +80,7 @@ export default function OutlierMap({ projectId, docs }) {
       .attr("letter-spacing", "0.18em")
       .attr("text-transform", "uppercase")
       .attr("fill", "#868e96")
-      .text("Kemiripan rata-rata terhadap proyek →");
+      .text(t("outlier.xLabel"));
     svg
       .append("text")
       .attr("transform", `translate(12,${height / 2}) rotate(-90)`)
@@ -87,7 +89,7 @@ export default function OutlierMap({ projectId, docs }) {
       .attr("letter-spacing", "0.18em")
       .attr("text-transform", "uppercase")
       .attr("fill", "#868e96")
-      .text("Volume teks →");
+      .text(t("outlier.yLabel"));
 
     // dots
     const tooltip = d3.select(svgRef.current.parentNode).select(".jm-tooltip");

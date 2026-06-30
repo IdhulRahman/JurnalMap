@@ -8,10 +8,12 @@ import {
   Quote,
   RefreshCw,
   Cpu,
+  Sparkles,
 } from "lucide-react";
 import EvidenceBadge from "@/components/EvidenceBadge";
 import { CATEGORY_LABEL, TIER_META } from "@/lib/tiers";
 import { useSettings } from "@/store/settings";
+import { useT } from "@/lib/useT";
 import {
   Select,
   SelectContent,
@@ -21,18 +23,19 @@ import {
 } from "@/components/ui/select";
 
 
-const SECTION_LABEL = {
-  abstract: "Abstrak",
-  objective: "Tujuan",
-  method: "Metode",
-  results: "Hasil",
-  conclusion: "Kesimpulan",
+const SECTION_LABEL_KEY = {
+  abstract: "summary.section.abstract",
+  objective: "summary.section.objective",
+  method: "summary.section.method",
+  results: "summary.section.results",
+  conclusion: "summary.section.conclusion",
 };
 const SECTION_ORDER = ["abstract", "objective", "method", "results", "conclusion"];
 
 
-export default function SummaryPanel({ docId, summary, claims, sections, modelUsed, onHighlight, onResummarized }) {
+export default function SummaryPanel({ docId, summary, claims, sections, modelUsed, personaUsed, onHighlight, onResummarized }) {
   const { settings } = useSettings();
+  const { t } = useT();
   const [activeKey, setActiveKey] = useState(null); // "section:abstract" or "claim:<id>"
   const [busyKey, setBusyKey] = useState(null);
   const [evidenceByKey, setEvidenceByKey] = useState({});
@@ -132,56 +135,83 @@ export default function SummaryPanel({ docId, summary, claims, sections, modelUs
       {/* Model picker + Ringkas Ulang */}
       <section
         data-testid="summary-model-bar"
-        className="flex items-center gap-2 pb-4 border-b border-[color:var(--jm-border)]"
+        className="pb-4 border-b border-[color:var(--jm-border)] space-y-2"
       >
-        <Cpu className="w-3.5 h-3.5 text-[color:var(--jm-text-3)]" />
-        <span className="text-[10px] uppercase tracking-[0.22em] font-semibold text-[color:var(--jm-text-3)]">
-          Model
-        </span>
-        <Select value={selectedModel} onValueChange={setSelectedModel}>
-          <SelectTrigger
-            data-testid="summary-model-select"
-            className="h-8 text-xs bg-[color:var(--jm-surface)] border-[color:var(--jm-border)] text-[color:var(--jm-text)] flex-1 min-w-0"
+        <div className="flex items-center gap-2">
+          <Cpu className="w-3.5 h-3.5 text-[color:var(--jm-text-3)]" />
+          <span className="text-[10px] uppercase tracking-[0.22em] font-semibold text-[color:var(--jm-text-3)]">
+            {t("summary.modelBar")}
+          </span>
+          <Select value={selectedModel} onValueChange={setSelectedModel}>
+            <SelectTrigger
+              data-testid="summary-model-select"
+              className="h-8 text-xs bg-[color:var(--jm-surface)] border-[color:var(--jm-border)] text-[color:var(--jm-text)] flex-1 min-w-0"
+            >
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              {(settings?.available_models || []).map((m) => (
+                <SelectItem
+                  key={`${m.provider}-${m.id}-${m.label}`}
+                  data-testid={`summary-model-option-${m.id}`}
+                  value={m.id}
+                >
+                  {m.label}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+          <button
+            data-testid="resummarize-btn"
+            onClick={resummarize}
+            disabled={resummarizing}
+            className="px-3 py-1.5 rounded-md text-xs font-semibold font-ui flex items-center gap-1.5 bg-[color:var(--jm-text)] text-[color:var(--jm-bg)] hover:opacity-90 disabled:opacity-50"
+            title="Ringkas ulang dengan model ini"
           >
-            <SelectValue />
-          </SelectTrigger>
-          <SelectContent>
-            {(settings?.available_models || []).map((m) => (
-              <SelectItem
-                key={`${m.provider}-${m.id}-${m.label}`}
-                data-testid={`summary-model-option-${m.id}`}
-                value={m.id}
+            {resummarizing ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <RefreshCw className="w-3.5 h-3.5" />}
+            {t("summary.resummarize")}
+          </button>
+        </div>
+        {(modelUsed || personaUsed) && (
+          <div
+            data-testid="summary-attribution"
+            className="flex items-center flex-wrap gap-1.5 text-[10px] font-ui text-[color:var(--jm-text-3)]"
+          >
+            <Sparkles className="w-3 h-3" />
+            <span className="uppercase tracking-[0.16em]">{t("summary.attribution")}:</span>
+            {modelUsed && (
+              <span
+                data-testid="attribution-model"
+                className="px-1.5 py-0.5 rounded bg-[color:var(--jm-sidebar)] text-[color:var(--jm-text-2)] font-semibold"
               >
-                {m.label}
-              </SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
-        <button
-          data-testid="resummarize-btn"
-          onClick={resummarize}
-          disabled={resummarizing}
-          className="px-3 py-1.5 rounded-md text-xs font-semibold font-ui flex items-center gap-1.5 bg-[color:var(--jm-text)] text-[color:var(--jm-bg)] hover:opacity-90 disabled:opacity-50"
-          title="Ringkas ulang dengan model ini"
-        >
-          {resummarizing ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <RefreshCw className="w-3.5 h-3.5" />}
-          Ringkas Ulang
-        </button>
+                {modelUsed}
+              </span>
+            )}
+            {personaUsed && (
+              <span
+                data-testid="attribution-persona"
+                className="px-1.5 py-0.5 rounded bg-[color:var(--jm-sidebar)] text-[color:var(--jm-text-2)] font-semibold"
+              >
+                {personaUsed}
+              </span>
+            )}
+          </div>
+        )}
       </section>
 
       {/* Overview */}
       <section>
         <div className="flex items-center gap-2 text-[10px] uppercase tracking-[0.22em] font-semibold text-[color:var(--jm-text-3)] mb-3">
-          <BookOpenCheck className="w-3.5 h-3.5" /> Ringkasan Jurnal Aktif
+          <BookOpenCheck className="w-3.5 h-3.5" /> {t("summary.overview")}
         </div>
         <p
           data-testid="document-summary"
           className="font-reading text-[15px] leading-relaxed text-[color:var(--jm-text)]"
         >
-          {summary || "Ringkasan belum tersedia."}
+          {summary || t("summary.overview.empty")}
         </p>
         <div className="mt-3 text-[11px] text-[color:var(--jm-text-3)] font-ui italic">
-          JurnalMap meringkas dari teks jurnal ini saja — bukan gabungan banyak jurnal.
+          {t("summary.overview.note")}
         </div>
       </section>
 
@@ -189,7 +219,7 @@ export default function SummaryPanel({ docId, summary, claims, sections, modelUs
       {hasSections && (
         <section>
           <div className="text-[10px] uppercase tracking-[0.22em] font-semibold text-[color:var(--jm-text-3)] mb-3">
-            Bagian-Bagian Jurnal
+            {t("summary.sections")}
           </div>
           <div data-testid="summary-sections" className="space-y-2">
             {SECTION_ORDER.map((k) => {
@@ -209,7 +239,7 @@ export default function SummaryPanel({ docId, summary, claims, sections, modelUs
                 >
                   <div className="flex items-start justify-between gap-2 mb-1.5">
                     <span className="text-[10px] uppercase tracking-[0.2em] font-semibold text-[color:var(--jm-text-3)]">
-                      {SECTION_LABEL[k]}
+                      {t(SECTION_LABEL_KEY[k])}
                     </span>
                     <ChevronRight
                       className={`w-4 h-4 text-[color:var(--jm-text-3)] transition-transform shrink-0 ${active ? "rotate-90" : ""}`}
@@ -220,12 +250,12 @@ export default function SummaryPanel({ docId, summary, claims, sections, modelUs
                   </p>
                   {active && busyKey === key && (
                     <div className="mt-2 flex items-center gap-2 text-xs text-[color:var(--jm-text-3)] font-ui">
-                      <Loader2 className="w-3.5 h-3.5 animate-spin" /> Mencari bukti…
+                      <Loader2 className="w-3.5 h-3.5 animate-spin" /> {t("summary.searchingEvidence")}
                     </div>
                   )}
                   {active && busyKey !== key && items.length === 0 && (
                     <div className="mt-2 text-xs text-[color:var(--jm-text-3)] font-ui">
-                      Tidak ditemukan kalimat sumber yang cocok.
+                      {t("summary.noEvidence")}
                     </div>
                   )}
                 </button>
@@ -239,10 +269,10 @@ export default function SummaryPanel({ docId, summary, claims, sections, modelUs
       <section>
         <div className="flex items-center justify-between mb-3">
           <div className="flex items-center gap-2 text-[10px] uppercase tracking-[0.22em] font-semibold text-[color:var(--jm-text-3)]">
-            <Quote className="w-3.5 h-3.5" /> Klaim Inti
+            <Quote className="w-3.5 h-3.5" /> {t("summary.claims")}
           </div>
           <div className="text-[10px] uppercase tracking-[0.2em] font-semibold text-[color:var(--jm-text-3)]">
-            klik untuk menyorot
+            {t("summary.clickHint")}
           </div>
         </div>
         <ul data-testid="claim-list" className="space-y-3">
@@ -323,11 +353,11 @@ export default function SummaryPanel({ docId, summary, claims, sections, modelUs
 
       <section className="pt-4 border-t border-[color:var(--jm-border)]">
         <div className="text-[10px] uppercase tracking-[0.22em] font-semibold text-[color:var(--jm-text-3)] mb-2">
-          Legenda Bukti
+          {t("summary.legend")}
         </div>
         <div className="flex flex-wrap gap-2">
-          {["high", "medium", "low"].map((t) => (
-            <EvidenceBadge key={t} tier={t} label={TIER_META[t].label} />
+          {["high", "medium", "low"].map((tier) => (
+            <EvidenceBadge key={tier} tier={tier} label={t(`tier.${tier}`)} />
           ))}
         </div>
       </section>

@@ -153,6 +153,31 @@ class OutlierResponse(BaseModel):
 
 
 # ----- Matrix -----
+# ----- Matrix -----
+MATRIX_METHODS = {
+    "default": {
+        "label": "Default (Tujuan/Metode/Sampel/Temuan/Keterbatasan)",
+        "fields": ["objective", "method", "sample", "key_finding", "limitation"],
+    },
+    "gap_analysis": {
+        "label": "Gap Analysis Matrix",
+        "fields": ["what_is_known", "gap_identified", "why_unresolved", "opportunity"],
+    },
+    "method_comparison": {
+        "label": "Method Comparison Matrix",
+        "fields": ["study_design", "sampling", "data_collection", "analysis_technique", "validity"],
+    },
+    "feature_comparison": {
+        "label": "Feature Comparison Matrix",
+        "fields": ["features_supported", "dataset", "evaluation_metric", "performance"],
+    },
+    "experimental_comparison": {
+        "label": "Experimental Comparison",
+        "fields": ["hypothesis", "conditions", "controls", "results", "statistical_test"],
+    },
+}
+
+
 class MatrixCell(BaseModel):
     field: str
     value: str

@@ -19,10 +19,12 @@ import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 import OutlierMap from "@/components/OutlierMap";
 import MatrixView from "@/components/MatrixView";
 import AskPanel from "@/components/AskPanel";
+import { useT } from "@/lib/useT";
 
 export default function ProjectPage() {
   const { id } = useParams();
   const nav = useNavigate();
+  const { t } = useT();
   const [project, setProject] = useState(null);
   const [docs, setDocs] = useState([]);
   const [busyUpload, setBusyUpload] = useState(false);
@@ -50,7 +52,7 @@ export default function ProjectPage() {
     if (!processing) return;
     const t = setInterval(loadDocs, 3000);
     return () => clearInterval(t);
-  }, [docs.map((d) => `${d.id}:${d.status}`).join(",")]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [docs.map((d) => `${d.id}:${d.status}`).join(",")]);
 
   const onUpload = async (file) => {
     setBusyUpload(true);
@@ -95,7 +97,7 @@ export default function ProjectPage() {
             onClick={() => nav("/")}
             className="flex items-center gap-1.5 text-xs uppercase tracking-[0.2em] font-semibold text-[color:var(--jm-text-3)] hover:text-[color:var(--jm-text)] transition-colors mb-3"
           >
-            <ArrowLeft className="w-3.5 h-3.5" /> Semua Proyek
+            <ArrowLeft className="w-3.5 h-3.5" /> {t("project.back")}
           </button>
           <div className="flex flex-wrap items-end justify-between gap-4">
             <div>
@@ -112,7 +114,7 @@ export default function ProjectPage() {
               )}
             </div>
             <div className="text-[11px] uppercase tracking-[0.2em] font-semibold text-[color:var(--jm-text-3)]">
-              {docs.length} jurnal dalam proyek ini
+              {t("project.journalsCount", { n: docs.length })}
             </div>
           </div>
         </div>
@@ -122,28 +124,28 @@ export default function ProjectPage() {
         <Tabs value={tab} onValueChange={setTab} className="w-full">
           <TabsList
             data-testid="project-tabs"
-            className="bg-white border border-[color:var(--jm-border)] p-1 rounded-lg h-auto"
+            className="bg-[color:var(--jm-surface)] border border-[color:var(--jm-border)] p-1 rounded-lg h-auto"
           >
             <TabsTrigger
               data-testid="tab-baca"
               value="baca"
-              className="data-[state=active]:bg-[color:var(--jm-text)] data-[state=active]:text-white px-4 py-2 gap-2"
+              className="data-[state=active]:bg-[color:var(--jm-text)] data-[state=active]:text-[color:var(--jm-bg)] px-4 py-2 gap-2"
             >
-              <BookOpen className="w-4 h-4" /> Baca
+              <BookOpen className="w-4 h-4" /> {t("tab.read")}
             </TabsTrigger>
             <TabsTrigger
               data-testid="tab-bandingkan"
               value="bandingkan"
-              className="data-[state=active]:bg-[color:var(--jm-text)] data-[state=active]:text-white px-4 py-2 gap-2"
+              className="data-[state=active]:bg-[color:var(--jm-text)] data-[state=active]:text-[color:var(--jm-bg)] px-4 py-2 gap-2"
             >
-              <GitCompare className="w-4 h-4" /> Bandingkan
+              <GitCompare className="w-4 h-4" /> {t("tab.compare")}
             </TabsTrigger>
             <TabsTrigger
               data-testid="tab-tanya"
               value="tanya"
-              className="data-[state=active]:bg-[color:var(--jm-text)] data-[state=active]:text-white px-4 py-2 gap-2"
+              className="data-[state=active]:bg-[color:var(--jm-text)] data-[state=active]:text-[color:var(--jm-bg)] px-4 py-2 gap-2"
             >
-              <MessageSquareText className="w-4 h-4" /> Tanya Pustaka
+              <MessageSquareText className="w-4 h-4" /> {t("tab.ask")}
             </TabsTrigger>
           </TabsList>
 
@@ -151,18 +153,18 @@ export default function ProjectPage() {
             <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
               <section className="lg:col-span-5">
                 <h3 className="text-[11px] uppercase tracking-[0.2em] font-semibold text-[color:var(--jm-text-3)] mb-3">
-                  Tambah Jurnal
+                  {t("project.add")}
                 </h3>
                 <UploadDropzone onUpload={onUpload} busy={busyUpload} />
               </section>
 
               <section className="lg:col-span-7">
                 <h3 className="text-[11px] uppercase tracking-[0.2em] font-semibold text-[color:var(--jm-text-3)] mb-3">
-                  Jurnal dalam Proyek
+                  {t("project.list")}
                 </h3>
                 {docs.length === 0 ? (
-                  <div className="rounded-xl border border-[color:var(--jm-border)] bg-white p-10 text-center text-sm text-[color:var(--jm-text-2)] font-ui">
-                    Unggah PDF pertama Anda untuk mulai membaca dengan pelacak bukti.
+                  <div className="rounded-xl border border-[color:var(--jm-border)] bg-[color:var(--jm-surface)] p-10 text-center text-sm text-[color:var(--jm-text-2)] font-ui">
+                    {t("project.empty")}
                   </div>
                 ) : (
                   <ul data-testid="documents-list" className="space-y-3">
@@ -170,7 +172,7 @@ export default function ProjectPage() {
                       <li
                         key={d.id}
                         data-testid={`doc-row-${d.id}`}
-                        className="rounded-xl border border-[color:var(--jm-border)] bg-white p-4 flex items-center gap-4 hover:border-[color:var(--jm-border-2)] transition-colors"
+                        className="rounded-xl border border-[color:var(--jm-border)] bg-[color:var(--jm-surface)] p-4 flex items-center gap-4 hover:border-[color:var(--jm-border-2)] transition-colors"
                       >
                         <div className="w-10 h-10 rounded-md bg-[color:var(--jm-sidebar)] flex items-center justify-center shrink-0">
                           <FileText className="w-5 h-5 text-[color:var(--jm-text-2)]" />
@@ -183,21 +185,21 @@ export default function ProjectPage() {
                             {d.filename} • {d.page_count > 0 ? `${d.page_count} hlm` : "—"}
                           </div>
                         </div>
-                        <StatusPill status={d.status} error={d.error} />
+                        <StatusPill status={d.status} error={d.error} t={t} />
                         {d.status === "ready" ? (
                           <Link
                             data-testid={`open-doc-${d.id}`}
                             to={`/project/${id}/doc/${d.id}`}
-                            className="text-xs font-semibold text-white bg-[color:var(--jm-text)] hover:bg-[#343a40] px-3 py-2 rounded-md transition-colors"
+                            className="text-xs font-semibold text-[color:var(--jm-bg)] bg-[color:var(--jm-text)] hover:opacity-90 px-3 py-2 rounded-md transition-colors"
                           >
-                            Buka
+                            {t("common.open")}
                           </Link>
                         ) : null}
                         <button
                           data-testid={`delete-doc-${d.id}`}
                           onClick={() => removeDoc(d.id)}
                           className="p-2 rounded hover:bg-[color:var(--jm-sidebar)]"
-                          aria-label="Hapus"
+                          aria-label={t("common.delete")}
                         >
                           <Trash2 className="w-4 h-4 text-[color:var(--jm-text-3)]" />
                         </button>
@@ -224,14 +226,14 @@ export default function ProjectPage() {
   );
 }
 
-function StatusPill({ status, error }) {
+function StatusPill({ status, error, t }) {
   if (status === "processing") {
     return (
       <span
         data-testid="status-processing"
         className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[11px] font-semibold bg-[color:var(--jm-sidebar)] text-[color:var(--jm-text-2)] font-ui"
       >
-        <Loader2 className="w-3 h-3 animate-spin" /> Memproses
+        <Loader2 className="w-3 h-3 animate-spin" /> {t("status.processing")}
       </span>
     );
   }
@@ -241,7 +243,7 @@ function StatusPill({ status, error }) {
         data-testid="status-ready"
         className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[11px] font-semibold tier-high font-ui"
       >
-        <CheckCircle2 className="w-3 h-3" /> Siap
+        <CheckCircle2 className="w-3 h-3" /> {t("status.ready")}
       </span>
     );
   }
@@ -251,7 +253,7 @@ function StatusPill({ status, error }) {
       title={error || ""}
       className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[11px] font-semibold tier-low font-ui"
     >
-      <AlertCircle className="w-3 h-3" /> Gagal
+      <AlertCircle className="w-3 h-3" /> {t("status.failed")}
     </span>
   );
 }

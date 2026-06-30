@@ -1,12 +1,14 @@
 import { Link, useLocation } from "react-router-dom";
 import { Layers, Library, Settings as SettingsIcon } from "lucide-react";
 import { useSettings } from "@/store/settings";
+import { useT } from "@/lib/useT";
 
 export default function Header({ rightSlot = null }) {
   const loc = useLocation();
   const onProject = loc.pathname.startsWith("/project");
-  const { settings, setTheme } = useSettings();
-  const theme = settings?.theme || "light";
+  const { settings } = useSettings();
+  const { t } = useT();
+  const _theme = settings?.theme || "light";
   return (
     <header
       data-testid="app-header"
@@ -34,14 +36,14 @@ export default function Header({ rightSlot = null }) {
           {!onProject && (
             <div className="hidden md:flex items-center gap-2 text-xs text-[color:var(--jm-text-2)]">
               <Library className="w-3.5 h-3.5" />
-              <span className="font-ui">Pustaka Penelitian Pribadi</span>
+              <span className="font-ui">{t("header.tagline")}</span>
             </div>
           )}
           {rightSlot}
           <Link
             to="/settings"
             data-testid="header-settings-link"
-            title="Pengaturan"
+            title={t("header.settings")}
             className="w-9 h-9 rounded-md flex items-center justify-center border border-[color:var(--jm-border)] text-[color:var(--jm-text-2)] hover:bg-[color:var(--jm-sidebar)] hover:text-[color:var(--jm-text)] transition-colors"
           >
             <SettingsIcon className="w-4 h-4" />

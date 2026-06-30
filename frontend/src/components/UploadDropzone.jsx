@@ -1,7 +1,9 @@
 import { useCallback, useState } from "react";
 import { UploadCloud, FileText, Loader2 } from "lucide-react";
+import { useT } from "@/lib/useT";
 
 export default function UploadDropzone({ onUpload, busy = false }) {
+  const { t } = useT();
   const [drag, setDrag] = useState(false);
   const [hover, setHover] = useState(false);
 
@@ -27,7 +29,7 @@ export default function UploadDropzone({ onUpload, busy = false }) {
       onMouseEnter={() => setHover(true)}
       onMouseLeave={() => setHover(false)}
       className={`block border-2 border-dashed rounded-xl p-8 text-center cursor-pointer transition-all
-        ${drag ? "border-[color:var(--jm-text)] bg-[color:var(--jm-sidebar)]" : hover ? "border-[color:var(--jm-border-2)] bg-white" : "border-[color:var(--jm-border)] bg-white"}
+        ${drag ? "border-[color:var(--jm-text)] bg-[color:var(--jm-sidebar)]" : hover ? "border-[color:var(--jm-border-2)] bg-[color:var(--jm-surface)]" : "border-[color:var(--jm-border)] bg-[color:var(--jm-surface)]"}
         ${busy ? "opacity-60 pointer-events-none" : ""}
       `}
     >
@@ -52,10 +54,10 @@ export default function UploadDropzone({ onUpload, busy = false }) {
         )}
         <div>
           <div className="font-ui text-sm font-semibold text-[color:var(--jm-text)]">
-            {busy ? "Mengunggah…" : "Tarik PDF ke sini atau klik untuk memilih"}
+            {busy ? t("upload.busy") : t("upload.drop")}
           </div>
           <div className="text-xs text-[color:var(--jm-text-3)] mt-1 font-ui">
-            Maks 1 file per unggahan • Diproses di latar belakang
+            {t("upload.hint")}
           </div>
         </div>
         <div className="flex items-center gap-2 text-[11px] uppercase tracking-[0.2em] text-[color:var(--jm-text-3)] font-semibold">

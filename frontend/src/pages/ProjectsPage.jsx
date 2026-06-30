@@ -4,6 +4,7 @@ import { Plus, Trash2, BookOpen, ArrowRight, FileText } from "lucide-react";
 import { api } from "@/services/api";
 import { toast } from "sonner";
 import Header from "@/components/Header";
+import { useT } from "@/lib/useT";
 
 import {
   Dialog,
@@ -23,6 +24,7 @@ export default function ProjectsPage() {
   const [open, setOpen] = useState(false);
   const [name, setName] = useState("");
   const [desc, setDesc] = useState("");
+  const { t } = useT();
 
   const load = async () => {
     setLoading(true);
@@ -73,34 +75,34 @@ export default function ProjectsPage() {
             <DialogTrigger asChild>
               <Button
                 data-testid="new-project-btn"
-                className="bg-[color:var(--jm-text)] text-white hover:bg-[#343a40] gap-2"
+                className="bg-[color:var(--jm-text)] text-[color:var(--jm-bg)] hover:opacity-90 gap-2"
               >
-                <Plus className="w-4 h-4" /> Proyek Baru
+                <Plus className="w-4 h-4" /> {t("home.new")}
               </Button>
             </DialogTrigger>
             <DialogContent data-testid="new-project-dialog">
               <DialogHeader>
                 <DialogTitle className="font-display text-2xl">
-                  Buat Proyek
+                  {t("home.dialog.title")}
                 </DialogTitle>
               </DialogHeader>
               <div className="space-y-3 pt-2">
                 <div>
                   <label className="text-[11px] uppercase tracking-[0.18em] font-semibold text-[color:var(--jm-text-3)]">
-                    Nama
+                    {t("home.dialog.name")}
                   </label>
                   <Input
                     data-testid="project-name-input"
                     autoFocus
                     value={name}
                     onChange={(e) => setName(e.target.value)}
-                    placeholder="Misal: Tinjauan Pustaka Pembelajaran Mesin Pendidikan"
+                    placeholder={t("home.dialog.placeholder")}
                     className="mt-1"
                   />
                 </div>
                 <div>
                   <label className="text-[11px] uppercase tracking-[0.18em] font-semibold text-[color:var(--jm-text-3)]">
-                    Deskripsi (opsional)
+                    {t("home.dialog.desc")}
                   </label>
                   <Textarea
                     data-testid="project-desc-input"
@@ -115,9 +117,9 @@ export default function ProjectsPage() {
                 <Button
                   data-testid="create-project-confirm"
                   onClick={create}
-                  className="bg-[color:var(--jm-text)] text-white hover:bg-[#343a40]"
+                  className="bg-[color:var(--jm-text)] text-[color:var(--jm-bg)] hover:opacity-90"
                 >
-                  Buat
+                  {t("home.dialog.create")}
                 </Button>
               </DialogFooter>
             </DialogContent>
@@ -135,28 +137,26 @@ export default function ProjectsPage() {
               data-testid="home-heading"
               className="font-display text-4xl sm:text-5xl lg:text-6xl tracking-[-0.02em] font-semibold text-[color:var(--jm-text)] leading-[1.02]"
             >
-              Baca, verifikasi, dan bandingkan jurnal —
-              <span className="text-[color:var(--jm-text-3)]"> tanpa</span>
-              <span className="italic font-display"> kompromi</span>
-              <span className="text-[color:var(--jm-text-3)]"> pada bukti.</span>
+              {t("home.hero.heading.a")}
+              <span className="text-[color:var(--jm-text-3)]"> {t("home.hero.heading.b")}</span>
+              <span className="italic font-display"> {t("home.hero.heading.c")}</span>
+              <span className="text-[color:var(--jm-text-3)]"> {t("home.hero.heading.d")}</span>
             </h1>
             <p className="mt-6 text-base text-[color:var(--jm-text-2)] max-w-xl leading-relaxed font-ui">
-              JurnalMap menemukan bukti, bukan menilai kebenaran. Membandingkan,
-              bukan memutuskan. Menunjukkan perbedaan, bukan menyimpulkan siapa
-              yang salah.
+              {t("home.hero.sub")}
             </p>
           </div>
           <div className="lg:col-span-5 hidden lg:flex items-end">
-            <div className="w-full p-6 rounded-2xl bg-white border border-[color:var(--jm-border)] surface-grain">
+            <div className="w-full p-6 rounded-2xl bg-[color:var(--jm-surface)] border border-[color:var(--jm-border)] surface-grain">
               <div className="font-display font-semibold text-lg text-[color:var(--jm-text)] mb-3">
-                Lima Pilar
+                {t("home.pillars.title")}
               </div>
               <ul className="space-y-2 text-sm text-[color:var(--jm-text-2)] font-ui">
-                <li className="flex gap-3"><span className="text-[color:var(--jm-text-3)] font-mono w-5">01</span><span>Panel Ganda + Pelacak Bukti Bertingkat</span></li>
-                <li className="flex gap-3"><span className="text-[color:var(--jm-text-3)] font-mono w-5">02</span><span>Deteksi Outlier dalam Proyek</span></li>
-                <li className="flex gap-3"><span className="text-[color:var(--jm-text-3)] font-mono w-5">03</span><span>Matriks Perbandingan Multi-Jurnal</span></li>
-                <li className="flex gap-3"><span className="text-[color:var(--jm-text-3)] font-mono w-5">04</span><span>Tanya Pustaka Lintas Dokumen</span></li>
-                <li className="flex gap-3"><span className="text-[color:var(--jm-text-3)] font-mono w-5">05</span><span>Manajemen Proyek</span></li>
+                <li className="flex gap-3"><span className="text-[color:var(--jm-text-3)] font-mono w-5">01</span><span>{t("home.pillar.1")}</span></li>
+                <li className="flex gap-3"><span className="text-[color:var(--jm-text-3)] font-mono w-5">02</span><span>{t("home.pillar.2")}</span></li>
+                <li className="flex gap-3"><span className="text-[color:var(--jm-text-3)] font-mono w-5">03</span><span>{t("home.pillar.3")}</span></li>
+                <li className="flex gap-3"><span className="text-[color:var(--jm-text-3)] font-mono w-5">04</span><span>{t("home.pillar.4")}</span></li>
+                <li className="flex gap-3"><span className="text-[color:var(--jm-text-3)] font-mono w-5">05</span><span>{t("home.pillar.5")}</span></li>
               </ul>
             </div>
           </div>
@@ -164,39 +164,39 @@ export default function ProjectsPage() {
 
         <div className="flex items-baseline justify-between mb-6 border-t border-[color:var(--jm-border)] pt-8">
           <h2 className="font-display text-2xl sm:text-3xl tracking-tight font-semibold text-[color:var(--jm-text)]">
-            Proyek Anda
+            {t("home.projects")}
           </h2>
           <div className="text-[11px] uppercase tracking-[0.2em] font-semibold text-[color:var(--jm-text-3)]">
-            {projects.length} proyek
+            {t("home.projects.count", { n: projects.length })}
           </div>
         </div>
 
         {loading ? (
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5">
             {[1,2,3].map((i) => (
-              <div key={i} className="h-48 rounded-xl bg-white border border-[color:var(--jm-border)] animate-pulse" />
+              <div key={i} className="h-48 rounded-xl bg-[color:var(--jm-surface)] border border-[color:var(--jm-border)] animate-pulse" />
             ))}
           </div>
         ) : projects.length === 0 ? (
           <div
             data-testid="empty-projects"
-            className="rounded-2xl border-2 border-dashed border-[color:var(--jm-border)] p-16 text-center bg-white"
+            className="rounded-2xl border-2 border-dashed border-[color:var(--jm-border)] p-16 text-center bg-[color:var(--jm-surface)]"
           >
             <div className="w-14 h-14 rounded-full bg-[color:var(--jm-sidebar)] mx-auto flex items-center justify-center mb-4">
               <BookOpen className="w-6 h-6 text-[color:var(--jm-text-2)]" />
             </div>
             <div className="font-display text-xl font-semibold text-[color:var(--jm-text)] mb-2">
-              Belum ada proyek
+              {t("home.empty.title")}
             </div>
             <p className="text-sm text-[color:var(--jm-text-2)] mb-6 font-ui">
-              Mulai dengan membuat proyek tinjauan pustaka pertama Anda.
+              {t("home.empty.body")}
             </p>
             <Button
               data-testid="empty-create-btn"
               onClick={() => setOpen(true)}
-              className="bg-[color:var(--jm-text)] text-white hover:bg-[#343a40] gap-2"
+              className="bg-[color:var(--jm-text)] text-[color:var(--jm-bg)] hover:opacity-90 gap-2"
             >
-              <Plus className="w-4 h-4" /> Buat proyek pertama
+              <Plus className="w-4 h-4" /> {t("home.empty.cta")}
             </Button>
           </div>
         ) : (
@@ -205,13 +205,13 @@ export default function ProjectsPage() {
               <div
                 key={p.id}
                 data-testid={`project-card-${p.id}`}
-                className="group relative p-6 rounded-xl border border-[color:var(--jm-border)] bg-white hover:-translate-y-0.5 hover:shadow-lg hover:border-[color:var(--jm-border-2)] transition-all"
+                className="group relative p-6 rounded-xl border border-[color:var(--jm-border)] bg-[color:var(--jm-surface)] hover:-translate-y-0.5 hover:shadow-lg hover:border-[color:var(--jm-border-2)] transition-all"
               >
                 <button
                   data-testid={`delete-project-${p.id}`}
                   onClick={() => del(p.id)}
                   className="absolute top-4 right-4 opacity-0 group-hover:opacity-100 transition-opacity p-1.5 rounded hover:bg-[color:var(--jm-sidebar)]"
-                  aria-label="Hapus proyek"
+                  aria-label={t("common.delete")}
                 >
                   <Trash2 className="w-4 h-4 text-[color:var(--jm-text-3)]" />
                 </button>
@@ -226,10 +226,10 @@ export default function ProjectsPage() {
                   )}
                   <div className="flex items-center justify-between text-xs text-[color:var(--jm-text-3)] font-ui pt-4 border-t border-[color:var(--jm-border)]">
                     <span className="flex items-center gap-1.5">
-                      <FileText className="w-3.5 h-3.5" /> {p.document_count} jurnal
+                      <FileText className="w-3.5 h-3.5" /> {t("home.card.journals", { n: p.document_count })}
                     </span>
                     <span className="inline-flex items-center gap-1 text-[color:var(--jm-text)] font-medium opacity-0 group-hover:opacity-100 transition-opacity">
-                      Buka <ArrowRight className="w-3.5 h-3.5" />
+                      {t("common.open")} <ArrowRight className="w-3.5 h-3.5" />
                     </span>
                   </div>
                 </Link>
