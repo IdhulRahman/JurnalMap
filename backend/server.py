@@ -141,6 +141,8 @@ async def delete_project(project_id: str):
                 except OSError:
                     pass
     await db.documents.delete_many({"project_id": project_id})
+    await db.workspace_outlines.delete_many({"project_id": project_id})
+    await db.workspace_contents.delete_many({"project_id": project_id})
     await db.projects.delete_one({"id": project_id})
     return {"deleted": True}
 
