@@ -10,6 +10,7 @@ import {
   AlertCircle,
   Trash2,
   FileText,
+  PenLine,
 } from "lucide-react";
 import { api } from "@/services/api";
 import { toast } from "sonner";
@@ -20,6 +21,7 @@ import OutlierMap from "@/components/OutlierMap";
 import MatrixView from "@/components/MatrixView";
 import AskPanel from "@/components/AskPanel";
 import EditableTitle from "@/components/EditableTitle";
+import Workspace from "@/components/Workspace/Workspace";
 import { useT } from "@/lib/useT";
 
 export default function ProjectPage() {
@@ -148,6 +150,13 @@ export default function ProjectPage() {
             >
               <MessageSquareText className="w-4 h-4" /> {t("tab.ask")}
             </TabsTrigger>
+            <TabsTrigger
+              data-testid="tab-workspace"
+              value="workspace"
+              className="data-[state=active]:bg-[color:var(--jm-text)] data-[state=active]:text-[color:var(--jm-bg)] px-4 py-2 gap-2"
+            >
+              <PenLine className="w-4 h-4" /> Workspace
+            </TabsTrigger>
           </TabsList>
 
           <TabsContent value="baca" className="mt-6">
@@ -228,6 +237,10 @@ export default function ProjectPage() {
 
           <TabsContent value="tanya" className="mt-6">
             <AskPanel projectId={id} docs={docs} />
+          </TabsContent>
+
+          <TabsContent value="workspace" className="mt-6">
+            <Workspace projectId={id} docs={docs} />
           </TabsContent>
         </Tabs>
       </main>

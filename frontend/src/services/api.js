@@ -61,4 +61,30 @@ export const api = {
     http
       .post(`/projects/${projectId}/ask`, { question })
       .then((r) => r.data),
+
+  // workspace
+  getOutline: (projectId) =>
+    http.get(`/projects/${projectId}/outline`).then((r) => r.data),
+  saveOutline: (projectId, payload) =>
+    http.post(`/projects/${projectId}/outline`, payload).then((r) => r.data),
+  workspaceGenerate: (projectId, payload) =>
+    http.post(`/projects/${projectId}/workspace/generate`, payload).then((r) => r.data),
+  workspaceGetContent: (projectId, subchapterId) =>
+    http
+      .get(`/projects/${projectId}/workspace/content/${subchapterId}`)
+      .then((r) => r.data),
+  workspaceSaveContent: (projectId, subchapterId, payload) =>
+    http
+      .put(`/projects/${projectId}/workspace/content/${subchapterId}`, payload)
+      .then((r) => r.data),
+  workspaceListContents: (projectId) =>
+    http.get(`/projects/${projectId}/workspace/contents`).then((r) => r.data),
+  getSentenceDetail: (documentId, sentenceId) =>
+    http
+      .get(`/documents/${documentId}/sentence/${sentenceId}`)
+      .then((r) => r.data),
+  workspaceInsertBadge: (projectId, payload) =>
+    http
+      .post(`/projects/${projectId}/workspace/insert-badge`, payload)
+      .then((r) => r.data),
 };

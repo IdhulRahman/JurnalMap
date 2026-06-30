@@ -11,6 +11,7 @@ import {
   Sparkles,
 } from "lucide-react";
 import EvidenceBadge from "@/components/EvidenceBadge";
+import InsertToWorkspaceDialog from "@/components/Workspace/InsertToWorkspaceDialog";
 import { CATEGORY_LABEL, TIER_META } from "@/lib/tiers";
 import { useSettings } from "@/store/settings";
 import { useT } from "@/lib/useT";
@@ -33,7 +34,7 @@ const SECTION_LABEL_KEY = {
 const SECTION_ORDER = ["abstract", "objective", "method", "results", "conclusion"];
 
 
-export default function SummaryPanel({ docId, summary, claims, sections, modelUsed, personaUsed, onHighlight, onResummarized }) {
+export default function SummaryPanel({ docId, projectId, summary, claims, sections, modelUsed, personaUsed, onHighlight, onResummarized }) {
   const { settings } = useSettings();
   const { t } = useT();
   const [activeKey, setActiveKey] = useState(null); // "section:abstract" or "claim:<id>"
@@ -41,6 +42,7 @@ export default function SummaryPanel({ docId, summary, claims, sections, modelUs
   const [evidenceByKey, setEvidenceByKey] = useState({});
   const [selectedModel, setSelectedModel] = useState(modelUsed || settings?.default_model || "");
   const [resummarizing, setResummarizing] = useState(false);
+  const [insertDialog, setInsertDialog] = useState({ open: false, payload: null });
 
   useEffect(() => {
     if (!selectedModel && settings?.default_model) setSelectedModel(settings.default_model);
@@ -324,7 +326,7 @@ export default function SummaryPanel({ docId, summary, claims, sections, modelUs
                                   Hal. {it.page}
                                 </span>
                               </div>
-                              <div
+                        <div
                                 className="text-[12.5px] leading-snug font-reading text-[color:var(--jm-text-2)] line-clamp-3 cursor-pointer hover:text-[color:var(--jm-text)]"
                                 onClick={(e) => {
                                   e.stopPropagation();
@@ -337,6 +339,26 @@ export default function SummaryPanel({ docId, summary, claims, sections, modelUs
                                 <div className="mt-1.5 text-[10px] font-ui italic text-[color:var(--jm-text-3)]">
                                   {it.rationale}
                                 </div>
+                              )}
+                              {projectId && (
+                                <button
+                                  data-testid={`insert-ws-evidence-${claim.id}-${i}`}
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    setInsertDialog({
+                                      open: true,
+                                      payload: {
+                                        document_id: docId,
+                                        sentence_id: it.sentence_id,
+                                        quote: it.text,
+                                        page: it.page,
+                                      },
+                                    });
+                                  }}
+                                  className="mt-2 inline-flex items-center gap-1 text-[10px] uppercase tracking-[0.16em] font-semibold font-ui text-[color:var(--jm-text-2)] hover:text-[color:var(--jm-text)]"
+                                >
+                                  ✍ Sisipkan ke Workspace
+                                </button>
                               )}
                             </div>
                           ))}
@@ -361,6 +383,15 @@ export default function SummaryPanel({ docId, summary, claims, sections, modelUs
           ))}
         </div>
       </section>
+
+      {projectId && (
+        <InsertToWorkspaceDialog
+          open={insertDialog.open}
+          onOpenChange={(o) => setInsertDialog((s) => ({ ...s, open: o }))}
+          projectId={projectId}
+          payload={insertDialog.payload}
+        />
+      )}
     </div>
   );
 }

@@ -54,6 +54,7 @@ from app.services.evidence_service import find_evidence
 from app.services.outlier_service import compute_outliers
 from app.services.matrix_service import extract_row, fields_for
 from app.services.qa_service import answer_question
+from app.services.synthesis_service import generate_subchapter, CITATION_FORMATS
 from app.services.llm import split_provider_model, emergent_key, default_model, LLMJSONError
 
 
@@ -536,6 +537,321 @@ async def ask_library(project_id: str, payload: AskRequest, model: Optional[str]
         model_used=res.get("model_used") or model_id,
         persona_used=res.get("persona_used") or settings.get("persona_id"),
     )
+
+
+# ---- Workspace (Sintesis Berbasis Bukti) ----
+@api.get("/projects/{project_id}/outline")
+async def get_outline(project_id: str):
+    await _project_or_404(project_id)
+    doc = await db.workspace_outlines.find_one({"project_id": project_id}, {"_id": 0})
+    if not doc:
+        return {
+            "project_id": project_id,
+            "title": "",
+            "chapters": [],
+            "citation_format": "ieee",
+            "exists": False,
+        }
+    doc["exists"] = True
+    return doc
+
+
+@api.post("/projects/{project_id}/outline")
+async def save_outline(project_id: str, payload: dict = Body(...)):
+    await _project_or_404(project_id)
+    title = (payload.get("title") or "").strip() or "Untitled Paper"
+    chapters = payload.get("chapters") or []
+    citation_format = (payload.get("citation_format") or "ieee").lower()
+    if citation_format not in CITATION_FORMATS:
+        citation_format = "ieee"
+
+    # Normalize: ensure ids exist
+    norm_chapters = []
+    for ch in chapters:
+        if not isinstance(ch, dict):
+            continue
+        ch_id = ch.get("id") or new_uid()
+        ch_title = (ch.get("title") or "Untitled chapter").strip()
+        subs = []
+        for sc in ch.get("subchapters") or []:
+            if not isinstance(sc, dict):
+                continue
+            subs.append({
+                "id": sc.get("id") or new_uid(),
+                "title": (sc.get("title") or "Untitled sub-chapter").strip(),
+            })
+        norm_chapters.append({"id": ch_id, "title": ch_title, "subchapters": subs})
+
+    outline_doc = {
+        "project_id": project_id,
+        "title": title,
+        "chapters": norm_chapters,
+        "citation_format": citation_format,
+        "updated_at": utcnow_iso(),
+    }
+    await db.workspace_outlines.update_one(
+        {"project_id": project_id},
+        {"$set": outline_doc},
+        upsert=True,
+    )
+    outline_doc["exists"] = True
+    return outline_doc
+
+
+def _find_subchapter(outline: dict, subchapter_id: str):
+    """Return (chapter, subchapter) tuple for the given subchapter id; (None, None) if not found."""
+    for ch in outline.get("chapters") or []:
+        for sc in ch.get("subchapters") or []:
+            if sc.get("id") == subchapter_id:
+                return ch, sc
+    return None, None
+
+
+def _flatten_subchapter_order(outline: dict) -> List[dict]:
+    """Return ordered list of subchapters as {chapter_id, chapter_title, id, title}."""
+    out = []
+    for ch in outline.get("chapters") or []:
+        for sc in ch.get("subchapters") or []:
+            out.append({
+                "chapter_id": ch.get("id"),
+                "chapter_title": ch.get("title"),
+                "id": sc.get("id"),
+                "title": sc.get("title"),
+            })
+    return out
+
+
+@api.post("/projects/{project_id}/workspace/generate")
+async def workspace_generate(project_id: str, payload: dict = Body(...)):
+    await _project_or_404(project_id)
+    outline = await db.workspace_outlines.find_one({"project_id": project_id}, {"_id": 0})
+    if not outline:
+        raise HTTPException(400, "Outline belum disusun. Buat Grand Outline terlebih dahulu.")
+
+    subchapter_id = payload.get("subchapter_id")
+    if not subchapter_id:
+        raise HTTPException(400, "subchapter_id is required")
+    chapter, subchapter = _find_subchapter(outline, subchapter_id)
+    if not subchapter:
+        raise HTTPException(404, "subchapter not found in outline")
+
+    # Build project_documents pool
+    docs = await db.documents.find(
+        {"project_id": project_id, "status": "ready"}, {"_id": 0}
+    ).to_list(500)
+    if not docs:
+        raise HTTPException(400, "Belum ada jurnal siap. Unggah PDF dan tunggu pemrosesan selesai.")
+
+    project_documents = []
+    for d in docs:
+        sents = await db.sentences.find({"document_id": d["id"]}, {"_id": 0}).to_list(5000)
+        project_documents.append({
+            "id": d["id"],
+            "title": d.get("title") or d.get("filename"),
+            "authors": d.get("authors") or "",
+            "year": d.get("year") or "",
+            "sentences": sents,
+        })
+
+    settings = await _load_settings()
+    model_id = payload.get("model") or settings.get("default_model") or default_model()
+    if payload.get("persona"):
+        settings = {**settings, "persona_id": payload["persona"]}
+    provider, model_id = split_provider_model(model_id, settings)
+
+    # Sliding-window: if previous_paragraph not provided, try to compute it from
+    # the most recent subchapter's stored content (flattened order, take subchapter
+    # that appears just before this one).
+    previous_paragraph = (payload.get("previous_paragraph") or "").strip()
+    if not previous_paragraph:
+        flat = _flatten_subchapter_order(outline)
+        ids = [s["id"] for s in flat]
+        try:
+            idx = ids.index(subchapter_id)
+        except ValueError:
+            idx = 0
+        for back in range(idx - 1, -1, -1):
+            prev_sc_id = ids[back]
+            prev_content = await db.workspace_contents.find_one(
+                {"project_id": project_id, "subchapter_id": prev_sc_id}, {"_id": 0}
+            )
+            if prev_content and (prev_content.get("plain_paragraphs") or []):
+                pars = prev_content.get("plain_paragraphs") or []
+                if pars:
+                    previous_paragraph = pars[-1]
+                    break
+
+    try:
+        result = await generate_subchapter(
+            project_id=project_id,
+            paper_title=outline.get("title") or "Untitled paper",
+            chapter_title=chapter.get("title") or "",
+            subchapter_title=subchapter.get("title") or "",
+            project_documents=project_documents,
+            citation_format=outline.get("citation_format") or "ieee",
+            previous_paragraph=previous_paragraph,
+            user_settings=settings,
+            provider=provider,
+            model=model_id,
+        )
+    except LLMJSONError as e:
+        raise HTTPException(502, f"Model returned malformed JSON ({e})")
+
+    # Persist generated content immediately so refresh keeps the draft
+    saved = {
+        "project_id": project_id,
+        "subchapter_id": subchapter_id,
+        "content": result["content_html"],
+        "plain_paragraphs": result["plain_paragraphs"],
+        "badges": result["badges"],
+        "references_used": result["references_used"],
+        "citation_format": outline.get("citation_format") or "ieee",
+        "updated_at": utcnow_iso(),
+    }
+    await db.workspace_contents.update_one(
+        {"project_id": project_id, "subchapter_id": subchapter_id},
+        {"$set": saved},
+        upsert=True,
+    )
+    return {
+        "subchapter_id": subchapter_id,
+        "content": result["content_html"],
+        "badges": result["badges"],
+        "references_used": result["references_used"],
+    }
+
+
+@api.get("/projects/{project_id}/workspace/content/{subchapter_id}")
+async def workspace_get_content(project_id: str, subchapter_id: str):
+    await _project_or_404(project_id)
+    doc = await db.workspace_contents.find_one(
+        {"project_id": project_id, "subchapter_id": subchapter_id}, {"_id": 0}
+    )
+    if not doc:
+        return {
+            "project_id": project_id,
+            "subchapter_id": subchapter_id,
+            "content": "",
+            "badges": [],
+            "references_used": [],
+        }
+    return doc
+
+
+@api.put("/projects/{project_id}/workspace/content/{subchapter_id}")
+async def workspace_save_content(project_id: str, subchapter_id: str, payload: dict = Body(...)):
+    await _project_or_404(project_id)
+    content = payload.get("content") or ""
+    badges = payload.get("badges") or []
+    plain_paragraphs = payload.get("plain_paragraphs") or []
+    references_used = payload.get("references_used") or []
+    update_doc = {
+        "project_id": project_id,
+        "subchapter_id": subchapter_id,
+        "content": content,
+        "badges": badges,
+        "plain_paragraphs": plain_paragraphs,
+        "references_used": references_used,
+        "updated_at": utcnow_iso(),
+    }
+    await db.workspace_contents.update_one(
+        {"project_id": project_id, "subchapter_id": subchapter_id},
+        {"$set": update_doc},
+        upsert=True,
+    )
+    return {"status": "saved", "updated_at": update_doc["updated_at"]}
+
+
+@api.get("/projects/{project_id}/workspace/contents")
+async def workspace_list_contents(project_id: str):
+    """All sub-chapter contents for export and sliding-window utilities."""
+    await _project_or_404(project_id)
+    rows = await db.workspace_contents.find({"project_id": project_id}, {"_id": 0}).to_list(500)
+    return {"items": rows}
+
+
+@api.get("/documents/{document_id}/sentence/{sentence_id}")
+async def get_sentence_detail(document_id: str, sentence_id: str):
+    d = await _document_or_404(document_id)
+    s = await db.sentences.find_one({"id": sentence_id, "document_id": document_id}, {"_id": 0})
+    if not s:
+        raise HTTPException(404, "sentence not found")
+    return {
+        "sentence_id": s["id"],
+        "document_id": document_id,
+        "text": s.get("text", ""),
+        "page": s.get("page"),
+        "section": s.get("section"),
+        "x0": s.get("x0"),
+        "y0": s.get("y0"),
+        "x1": s.get("x1"),
+        "y1": s.get("y1"),
+        "page_width": s.get("page_width"),
+        "page_height": s.get("page_height"),
+        "document_title": d.get("title") or d.get("filename"),
+        "document_authors": d.get("authors") or "",
+        "document_year": d.get("year") or "",
+    }
+
+
+@api.post("/projects/{project_id}/workspace/insert-badge")
+async def workspace_insert_badge(project_id: str, payload: dict = Body(...)):
+    """Insert a citation badge (from Baca/Matrix/Tanya) into a target sub-chapter editor.
+
+    Body:
+        subchapter_id: str
+        document_id: str
+        sentence_id: str (optional — if omitted we still create a badge with quote/page)
+        quote: str
+        page: int|None
+        label: str (optional override; otherwise computed from current outline format)
+    """
+    await _project_or_404(project_id)
+    subchapter_id = payload.get("subchapter_id")
+    document_id = payload.get("document_id")
+    sentence_id = payload.get("sentence_id")
+    quote = (payload.get("quote") or "").strip()
+    page = payload.get("page")
+    if not subchapter_id or not document_id:
+        raise HTTPException(400, "subchapter_id and document_id are required")
+
+    outline = await db.workspace_outlines.find_one({"project_id": project_id}, {"_id": 0})
+    fmt = (outline or {}).get("citation_format") or "ieee"
+    d = await db.documents.find_one({"id": document_id}, {"_id": 0})
+    if not d:
+        raise HTTPException(404, "document not found")
+
+    label = payload.get("label")
+    if not label:
+        if fmt == "ieee":
+            # Use position in references_used so far for this content
+            existing = await db.workspace_contents.find_one(
+                {"project_id": project_id, "subchapter_id": subchapter_id}, {"_id": 0}
+            )
+            refs = (existing or {}).get("references_used") or []
+            existing_ids = [r["document_id"] for r in refs]
+            if document_id in existing_ids:
+                num = existing_ids.index(document_id) + 1
+            else:
+                num = len(existing_ids) + 1
+            label = f"[{num}]"
+        elif fmt == "apa7":
+            label = f"({d.get('authors') or 'Anon'}, {d.get('year') or 'n.d.'})"
+        else:
+            label = f"({d.get('authors') or 'Anon'}, {d.get('year') or 'n.d.'})"
+
+    badge = {
+        "badge_id": uuid.uuid4().hex[:10],
+        "label": label,
+        "document_id": document_id,
+        "document_title": d.get("title") or d.get("filename"),
+        "sentence_id": sentence_id or "",
+        "page": page,
+        "quote": quote,
+        "authors": d.get("authors") or "",
+        "year": d.get("year") or "",
+    }
+    return {"badge": badge, "citation_format": fmt}
 
 
 # ---- Mount ----

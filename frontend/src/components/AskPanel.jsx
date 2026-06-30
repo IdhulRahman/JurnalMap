@@ -1,8 +1,9 @@
 import { useState } from "react";
-import { Send, MessageSquareText, Loader2, FileSearch, Sparkles } from "lucide-react";
+import { Send, MessageSquareText, Loader2, FileSearch, Sparkles, PenLine } from "lucide-react";
 import { api } from "@/services/api";
 import { toast } from "sonner";
 import EvidenceBadge from "@/components/EvidenceBadge";
+import InsertToWorkspaceDialog from "@/components/Workspace/InsertToWorkspaceDialog";
 import { useT } from "@/lib/useT";
 
 export default function AskPanel({ projectId, docs }) {
@@ -10,6 +11,7 @@ export default function AskPanel({ projectId, docs }) {
   const [q, setQ] = useState("");
   const [busy, setBusy] = useState(false);
   const [history, setHistory] = useState([]); // [{q, answer, citations, overall_tier}]
+  const [insertDialog, setInsertDialog] = useState({ open: false, payload: null });
   const ready = (docs || []).filter((d) => d.status === "ready");
 
   const ask = async () => {
@@ -129,6 +131,23 @@ export default function AskPanel({ projectId, docs }) {
                         <div className="text-[12.5px] leading-snug font-reading text-[color:var(--jm-text-2)] mt-0.5 line-clamp-2">
                           &ldquo;{c.excerpt}&rdquo;
                         </div>
+                        <button
+                          data-testid={`ask-insert-ws-${i}-${ci}`}
+                          onClick={() =>
+                            setInsertDialog({
+                              open: true,
+                              payload: {
+                                document_id: c.document_id,
+                                sentence_id: c.sentence_id,
+                                quote: c.excerpt,
+                                page: c.page,
+                              },
+                            })
+                          }
+                          className="mt-1.5 inline-flex items-center gap-1 text-[10px] uppercase tracking-[0.16em] font-semibold font-ui text-[color:var(--jm-text-2)] hover:text-[color:var(--jm-text)]"
+                        >
+                          <PenLine className="w-3 h-3" /> Sisipkan ke Workspace
+                        </button>
                       </div>
                     </li>
                   ))}
@@ -138,6 +157,12 @@ export default function AskPanel({ projectId, docs }) {
           </article>
         ))}
       </div>
+      <InsertToWorkspaceDialog
+        open={insertDialog.open}
+        onOpenChange={(o) => setInsertDialog((s) => ({ ...s, open: o }))}
+        projectId={projectId}
+        payload={insertDialog.payload}
+      />
     </section>
   );
 }

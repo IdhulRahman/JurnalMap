@@ -85,6 +85,7 @@ export default function DocumentReader() {
           ) : (
             <SummaryPanel
               docId={docId}
+              projectId={projectId}
               summary={summary.summary}
               sections={summary.sections || {}}
               modelUsed={summary.model_used}

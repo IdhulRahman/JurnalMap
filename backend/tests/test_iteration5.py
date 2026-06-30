@@ -13,7 +13,7 @@ import fitz  # PyMuPDF
 import pytest
 import requests
 
-BASE_URL = os.environ.get("REACT_APP_BACKEND_URL", "https://research-matrix-1.preview.emergentagent.com").rstrip("/")
+BASE_URL = os.environ.get("REACT_APP_BACKEND_URL", "https://citation-drafts.preview.emergentagent.com").rstrip("/")
 
 # Ensure /app/backend on path for unit-level imports
 sys.path.insert(0, "/app/backend")

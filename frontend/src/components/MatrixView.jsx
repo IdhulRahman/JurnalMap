@@ -1,8 +1,9 @@
 import { useEffect, useState } from "react";
-import { Grid3x3, Loader2, Quote, RefreshCw, FileDown, FileText } from "lucide-react";
+import { Grid3x3, Loader2, Quote, RefreshCw, FileDown, FileText, PenLine } from "lucide-react";
 import { api } from "@/services/api";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
+import InsertToWorkspaceDialog from "@/components/Workspace/InsertToWorkspaceDialog";
 import {
   Select,
   SelectContent,
@@ -49,6 +50,7 @@ export default function MatrixView({ projectId, docs }) {
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(false);
   const [activeCell, setActiveCell] = useState(null);
+  const [insertDialog, setInsertDialog] = useState({ open: false, payload: null });
 
   const methods = settings?.matrix_methods || [
     { id: "default", label: "Default" },
@@ -246,6 +248,24 @@ export default function MatrixView({ projectId, docs }) {
                       Hal. {activeCell.page}
                     </div>
                   ) : null}
+                  <button
+                    data-testid="matrix-insert-ws"
+                    onClick={() => {
+                      const row = data.rows[activeCell.rowIdx];
+                      setInsertDialog({
+                        open: true,
+                        payload: {
+                          document_id: row?.document_id,
+                          sentence_id: "",
+                          quote: activeCell.excerpt || activeCell.value,
+                          page: activeCell.page,
+                        },
+                      });
+                    }}
+                    className="mt-3 inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-md text-[11px] font-semibold font-ui bg-[color:var(--jm-text)] text-[color:var(--jm-bg)] hover:opacity-90"
+                  >
+                    <PenLine className="w-3 h-3" /> Sisipkan ke Workspace
+                  </button>
                 </div>
               ) : (
                 <div className="text-sm text-[color:var(--jm-text-3)] font-ui italic">
@@ -256,6 +276,12 @@ export default function MatrixView({ projectId, docs }) {
           </div>
         </>
       )}
+      <InsertToWorkspaceDialog
+        open={insertDialog.open}
+        onOpenChange={(o) => setInsertDialog((s) => ({ ...s, open: o }))}
+        projectId={projectId}
+        payload={insertDialog.payload}
+      />
     </section>
   );
 }
