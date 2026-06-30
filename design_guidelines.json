@@ -1,0 +1,128 @@
+{
+  "project_name": "JurnalMap",
+  "theme": "Light",
+  "archetype": "Archetype 4 (Swiss & High-Contrast) + Organic Textures",
+  "design_philosophy": "AI finds evidence, doesn't judge truth. The UI must feel objective, clear, and authoritative. Tension is created through strict grid alignments (Control Room layout) and precise typographic hierarchy rather than decorative elements. Reading comfort is paramount.",
+  "colors": {
+    "background": {
+      "main": "#F8F9FA",
+      "surface": "#FFFFFF",
+      "reading_panel": "#FCFCF9",
+      "sidebar": "#F1F3F5"
+    },
+    "text": {
+      "primary": "#1A1D20",
+      "secondary": "#495057",
+      "tertiary": "#868E96",
+      "inverse": "#FFFFFF"
+    },
+    "border": {
+      "default": "#E9ECEF",
+      "focus": "#228BE6"
+    },
+    "evidence_tiers": {
+      "high": {
+        "bg": "#E3FCEF",
+        "text": "#059669",
+        "border": "#A7F3D0",
+        "icon": "CheckCircle2",
+        "description": "High confidence, explicit agreement"
+      },
+      "medium": {
+        "bg": "#FEF3C7",
+        "text": "#D97706",
+        "border": "#FDE68A",
+        "icon": "AlertTriangle",
+        "description": "Medium confidence, implicit or partial"
+      },
+      "low": {
+        "bg": "#FEE2E2",
+        "text": "#DC2626",
+        "border": "#FECACA",
+        "icon": "XCircle",
+        "description": "Low confidence, contradiction or insufficient"
+      }
+    }
+  },
+  "typography": {
+    "fonts": {
+      "headings": "Cabinet Grotesk, sans-serif",
+      "ui_elements": "IBM Plex Sans, sans-serif",
+      "reading_body": "Source Serif Pro, serif"
+    },
+    "hierarchy": {
+      "h1": "text-4xl sm:text-5xl tracking-tight font-bold text-[#1A1D20]",
+      "h2": "text-2xl sm:text-3xl tracking-tight font-semibold text-[#1A1D20]",
+      "h3": "text-xl font-medium text-[#1A1D20]",
+      "body_ui": "text-sm font-medium leading-tight text-[#495057]",
+      "body_reading": "text-base leading-relaxed text-[#1A1D20]",
+      "labels": "text-xs uppercase tracking-[0.2em] font-semibold text-[#868E96]"
+    }
+  },
+  "layout": {
+    "strategy": "Control Room Grid (Dense, Data-Heavy, Scannable)",
+    "dual_panel_reading": {
+      "container": "grid grid-cols-1 lg:grid-cols-12 h-[calc(100vh-64px)] overflow-hidden",
+      "left_panel_pdf": "col-span-1 lg:col-span-7 bg-[#FCFCF9] h-full overflow-y-auto border-r border-[#E9ECEF] relative",
+      "right_panel_summary": "col-span-1 lg:col-span-5 bg-[#FFFFFF] h-full overflow-y-auto p-6"
+    },
+    "matrix_comparison": {
+      "container": "w-full overflow-x-auto border-collapse",
+      "cell": "p-4 align-top border-b border-r border-[#E9ECEF]"
+    }
+  },
+  "components": {
+    "buttons": {
+      "primary": "bg-[#1A1D20] text-white hover:bg-[#343A40] transition-colors rounded-md px-4 py-2 font-medium text-sm flex items-center justify-center gap-2",
+      "secondary": "bg-white text-[#1A1D20] border border-[#E9ECEF] hover:bg-[#F8F9FA] transition-colors rounded-md px-4 py-2 font-medium text-sm flex items-center justify-center gap-2",
+      "evidence_badge": "inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-bold border"
+    },
+    "cards": {
+      "claim_card": "p-4 rounded-lg border border-[#E9ECEF] bg-white hover:shadow-md hover:border-[#CED4DA] transition-all cursor-pointer mb-4 relative",
+      "project_card": "p-6 rounded-xl border border-[#E9ECEF] bg-white hover:-translate-y-1 hover:shadow-lg transition-transform duration-200"
+    },
+    "d3_outlier_map": {
+      "wrapper": "w-full h-[600px] bg-[#FFFFFF] border border-[#E9ECEF] rounded-xl relative overflow-hidden p-4",
+      "points": "opacity-60 hover:opacity-100 transition-opacity stroke-white stroke-[1.5px]",
+      "interactions": "React Context API pattern for hover state propagation. Floating tooltips on hover. d3.zoom for navigation."
+    },
+    "ask_library": {
+      "chat_container": "flex flex-col h-full bg-[#F8F9FA] rounded-xl border border-[#E9ECEF] overflow-hidden",
+      "message_bubble_user": "bg-[#1A1D20] text-white self-end rounded-2xl rounded-tr-sm px-4 py-3 max-w-[80%]",
+      "message_bubble_ai": "bg-white border border-[#E9ECEF] self-start rounded-2xl rounded-tl-sm px-4 py-3 max-w-[90%] shadow-sm text-[#1A1D20]",
+      "source_citation": "mt-2 pt-2 border-t border-[#E9ECEF] text-xs flex items-center gap-2 text-[#495057]"
+    }
+  },
+  "motion": {
+    "hover": "transition-all duration-200 ease-in-out",
+    "accessibility": "respect prefers-reduced-motion"
+  },
+  "icons": {
+    "library": "lucide-react"
+  },
+  "media": {
+    "image_urls": [
+      {
+        "url": "https://images.unsplash.com/photo-1586074299757-dc655f18518c",
+        "category": "empty_state_background",
+        "description": "White paper texture. Use as a subtle background for the login page or empty project states to reinforce the 'document/academic' feel."
+      },
+      {
+        "url": "https://images.unsplash.com/photo-1773759543914-3e9d6b1d49c1",
+        "category": "marketing_hero",
+        "description": "Modern library architecture. Use for the landing page hero section with a heavy white/glassmorphism overlay."
+      }
+    ]
+  },
+  "accessibility_and_testing": {
+    "testing_attributes": "All interactive elements MUST include data-testid attributes (e.g., data-testid='upload-pdf-btn')",
+    "contrast": "Ensure all text passes WCAG AA. Do not rely solely on color for evidence tiers (always use icons combined with color)."
+  },
+  "instructions_to_main_agent": [
+    "Install dependencies: lucide-react, framer-motion, d3, react-pdf.",
+    "Implement the Dual Panel layout using strict CSS Grid. Ensure the PDF viewer (react-pdf) fits within the left panel without breaking the viewport height.",
+    "For the D3 Outlier Map, use the 'React + D3 component' pattern. Bind D3 SVGs to React components using refs, and handle state (hover/zoom) via React Context.",
+    "Evidence tiers MUST include both color and iconography (CheckCircle2, AlertTriangle, XCircle) to be accessible to color-blind users.",
+    "Use Shadcn UI components for inputs and overlays (Tabs, Dialogs, Select), customizing them heavily to remove the default look. Apply IBM Plex Sans for UI and Source Serif Pro for heavy reading blocks."
+  ]
+}
