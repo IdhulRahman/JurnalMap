@@ -125,6 +125,18 @@ export const TRANSLATIONS = {
     "tier.high": "Bukti kuat",
     "tier.medium": "Bukti parsial",
     "tier.low": "Bukti lemah",
+
+    "title.edit": "Ubah judul",
+    "title.save": "Simpan",
+    "title.cancel": "Batal",
+    "title.placeholder": "Masukkan judul jurnal",
+    "title.empty": "Judul tidak boleh kosong",
+    "title.updated": "Judul diperbarui",
+
+    "matrix.csv.excerpt": "kutipan",
+    "matrix.csv.page": "halaman",
+
+    "ask.via": "via",
   },
 
   en: {
@@ -251,6 +263,18 @@ export const TRANSLATIONS = {
     "tier.high": "Strong evidence",
     "tier.medium": "Partial evidence",
     "tier.low": "Weak evidence",
+
+    "title.edit": "Edit title",
+    "title.save": "Save",
+    "title.cancel": "Cancel",
+    "title.placeholder": "Enter journal title",
+    "title.empty": "Title cannot be empty",
+    "title.updated": "Title updated",
+
+    "matrix.csv.excerpt": "excerpt",
+    "matrix.csv.page": "page",
+
+    "ask.via": "via",
   },
 };
 

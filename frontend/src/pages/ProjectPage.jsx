@@ -19,6 +19,7 @@ import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 import OutlierMap from "@/components/OutlierMap";
 import MatrixView from "@/components/MatrixView";
 import AskPanel from "@/components/AskPanel";
+import EditableTitle from "@/components/EditableTitle";
 import { useT } from "@/lib/useT";
 
 export default function ProjectPage() {
@@ -178,9 +179,17 @@ export default function ProjectPage() {
                           <FileText className="w-5 h-5 text-[color:var(--jm-text-2)]" />
                         </div>
                         <div className="flex-1 min-w-0">
-                          <div className="font-ui font-semibold text-sm text-[color:var(--jm-text)] truncate">
-                            {d.title || d.filename}
-                          </div>
+                          <EditableTitle
+                            documentId={d.id}
+                            value={d.title || d.filename}
+                            variant="row"
+                            testIdPrefix={`edit-title-${d.id}`}
+                            className="font-ui font-semibold text-sm text-[color:var(--jm-text)]"
+                            inputClass="text-sm"
+                            onSaved={(newTitle) => {
+                              setDocs((arr) => arr.map((x) => x.id === d.id ? { ...x, title: newTitle } : x));
+                            }}
+                          />
                           <div className="text-xs text-[color:var(--jm-text-3)] font-ui mt-0.5">
                             {d.filename} • {d.page_count > 0 ? `${d.page_count} hlm` : "—"}
                           </div>

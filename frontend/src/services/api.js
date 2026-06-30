@@ -29,6 +29,8 @@ export const api = {
       .then((r) => r.data);
   },
   getDocument: (id) => http.get(`/documents/${id}`).then((r) => r.data),
+  updateDocumentTitle: (id, title) =>
+    http.patch(`/documents/${id}`, { title }).then((r) => r.data),
   deleteDocument: (id) => http.delete(`/documents/${id}`).then((r) => r.data),
   getSummary: (id) => http.get(`/documents/${id}/summary`).then((r) => r.data),
   getStatus: (id) => http.get(`/documents/${id}/status`).then((r) => r.data),

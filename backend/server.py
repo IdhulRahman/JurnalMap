@@ -45,6 +45,7 @@ from app.models.schemas import (
     Settings,
     PERSONAS,
     MATRIX_METHODS,
+    DocumentTitleUpdate,
     new_uid,
     utcnow_iso,
 )
@@ -191,6 +192,23 @@ async def upload_document(
 @api.get("/documents/{document_id}", response_model=DocumentMeta)
 async def get_document(document_id: str):
     d = await _document_or_404(document_id)
+    return DocumentMeta(**d)
+
+
+@api.patch("/documents/{document_id}", response_model=DocumentMeta)
+async def update_document(document_id: str, payload: DocumentTitleUpdate):
+    """Update editable document fields. Currently: title only."""
+    d = await _document_or_404(document_id)
+    new_title = (payload.title or "").strip()
+    if not new_title:
+        raise HTTPException(400, "title must not be empty")
+    if len(new_title) > 500:
+        new_title = new_title[:500]
+    await db.documents.update_one({"id": document_id}, {"$set": {"title": new_title}})
+    # Also refresh the cached title on any matrix cache rows for this doc so the
+    # comparison table reflects the new label without re-running the LLM.
+    await db.matrix_cache.update_many({"document_id": document_id}, {"$set": {"title": new_title}})
+    d["title"] = new_title
     return DocumentMeta(**d)
 
 
@@ -515,6 +533,8 @@ async def ask_library(project_id: str, payload: AskRequest, model: Optional[str]
         answer=res["answer"],
         citations=[Citation(**c) for c in res["citations"]],
         overall_tier=res["overall_tier"],
+        model_used=res.get("model_used") or model_id,
+        persona_used=res.get("persona_used") or settings.get("persona_id"),
     )
 
 

@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="utf-8"?><testsuites name="pytest tests"><testsuite name="pytest" errors="0" failures="1" skipped="0" tests="12" time="58.046" timestamp="2026-06-30T18:42:20.616055+00:00" hostname="agent-env-9704aeba-663e-4b86-94f0-e32c85071af8"><testcase classname="tests.test_iteration6.TestAskAttribution" name="test_openapi_schema_has_model_and_persona" time="0.363"><failure message="requests.exceptions.JSONDecodeError: Expecting value: line 1 column 1 (char 0)">/root/.venv/lib/python3.11/site-packages/requests/models.py:1116: in json
+    return complexjson.loads(self.text, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+/usr/local/lib/python3.11/json/__init__.py:346: in loads
+    return _default_decoder.decode(s)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^
+/usr/local/lib/python3.11/json/decoder.py:337: in decode
+    obj, end = self.raw_decode(s, idx=_w(s, 0).end())
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+/usr/local/lib/python3.11/json/decoder.py:355: in raw_decode
+    raise JSONDecodeError("Expecting value", s, err.value) from None
+E   json.decoder.JSONDecodeError: Expecting value: line 1 column 1 (char 0)
+
+During handling of the above exception, another exception occurred:
+tests/test_iteration6.py:171: in test_openapi_schema_has_model_and_persona
+    schema = r.json()
+             ^^^^^^^^
+/root/.venv/lib/python3.11/site-packages/requests/models.py:1120: in json
+    raise RequestsJSONDecodeError(e.msg, e.doc, e.pos)
+E   requests.exceptions.JSONDecodeError: Expecting value: line 1 column 1 (char 0)</failure></testcase><testcase classname="tests.test_iteration6.TestPatchDocumentTitle" name="test_patch_success_returns_updated_title" time="18.024" /><testcase classname="tests.test_iteration6.TestPatchDocumentTitle" name="test_get_document_after_patch" time="0.119" /><testcase classname="tests.test_iteration6.TestPatchDocumentTitle" name="test_summary_endpoint_reflects_new_title" time="0.105" /><testcase classname="tests.test_iteration6.TestPatchDocumentTitle" name="test_patch_empty_title_400" time="0.102" /><testcase classname="tests.test_iteration6.TestPatchDocumentTitle" name="test_patch_whitespace_only_400" time="0.114" /><testcase classname="tests.test_iteration6.TestPatchDocumentTitle" name="test_patch_unknown_id_404" time="0.109" /><testcase classname="tests.test_iteration6.TestPatchDocumentTitle" name="test_patch_extra_fields_ignored" time="0.265" /><testcase classname="tests.test_iteration6.TestPatchDocumentTitle" name="test_patch_truncates_to_500_chars" time="0.272" /><testcase classname="tests.test_iteration6.TestAskAttribution" name="test_ask_returns_attribution" time="29.021" /><testcase classname="tests.test_iteration6.TestAskAttribution" name="test_ask_persona_switch_reflected" time="0.428" /><testcase classname="tests.test_iteration6.TestMatrixCacheTitleSync" name="test_matrix_title_updates_after_patch_without_refresh" time="27.427" /></testsuite></testsuites>

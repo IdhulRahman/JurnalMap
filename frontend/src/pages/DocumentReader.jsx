@@ -6,6 +6,7 @@ import { toast } from "sonner";
 import Header from "@/components/Header";
 import PdfViewer from "@/components/PdfViewer";
 import SummaryPanel from "@/components/SummaryPanel";
+import EditableTitle from "@/components/EditableTitle";
 import { useT } from "@/lib/useT";
 
 export default function DocumentReader() {
@@ -43,12 +44,16 @@ export default function DocumentReader() {
             <ArrowLeft className="w-3.5 h-3.5" /> {t("reader.back")}
           </Link>
           <div className="w-px h-5 bg-[color:var(--jm-border)]" />
-          <div
-            data-testid="document-title"
-            className="font-display font-semibold text-base text-[color:var(--jm-text)] truncate"
-            title={summary?.title || ""}
-          >
-            {summary?.title || summary?.filename || "—"}
+          <div className="flex-1 min-w-0">
+            <EditableTitle
+              documentId={docId}
+              value={summary?.title || summary?.filename || "—"}
+              variant="title"
+              testIdPrefix="reader-title"
+              className="font-display font-semibold text-base text-[color:var(--jm-text)]"
+              inputClass="font-display text-base font-semibold"
+              onSaved={(newTitle) => setSummary((s) => (s ? { ...s, title: newTitle } : s))}
+            />
           </div>
         </div>
       </div>

@@ -135,4 +135,6 @@ async def answer_question(
         "answer": answer_text,
         "citations": citations,
         "overall_tier": overall,
+        "model_used": model,
+        "persona_used": (user_settings or {}).get("persona_id"),
     }

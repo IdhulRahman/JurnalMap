@@ -89,7 +89,8 @@ export default function MatrixView({ projectId, docs }) {
   };
   const onExportCsv = () => {
     if (!data) return;
-    download(`matriks-${method}-${Date.now()}.csv`, matrixToCsv(data, labelMap), "text/csv");
+    const suffixes = { excerpt: t("matrix.csv.excerpt"), page: t("matrix.csv.page") };
+    download(`matriks-${method}-${Date.now()}.csv`, matrixToCsv(data, labelMap, suffixes), "text/csv");
   };
 
   return (

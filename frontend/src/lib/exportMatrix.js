@@ -37,10 +37,16 @@ export function matrixToMarkdown(data, labelMap = {}, methodLabel = "") {
   return lines.join("\n");
 }
 
-export function matrixToCsv(data, labelMap = {}) {
+export function matrixToCsv(data, labelMap = {}, suffixes = { excerpt: "excerpt", page: "page" }) {
   const fields = data.fields || [];
-  const header = ["journal", ...fields, ...fields.map((f) => `${f}__excerpt`), ...fields.map((f) => `${f}__page`)];
-  const lines = [header.map((h) => fieldLabel(h, labelMap)).map(csvEscape).join(",")];
+  const lbl = (f) => labelMap[f] || f;
+  const header = [
+    "journal",
+    ...fields.map(lbl),
+    ...fields.map((f) => `${lbl(f)} — ${suffixes.excerpt}`),
+    ...fields.map((f) => `${lbl(f)} — ${suffixes.page}`),
+  ];
+  const lines = [header.map(csvEscape).join(",")];
   for (const row of data.rows || []) {
     const map = Object.fromEntries((row.cells || []).map((c) => [c.field, c]));
     const out = [row.title];

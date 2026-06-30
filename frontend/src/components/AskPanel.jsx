@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { Send, MessageSquareText, Loader2, FileSearch } from "lucide-react";
+import { Send, MessageSquareText, Loader2, FileSearch, Sparkles } from "lucide-react";
 import { api } from "@/services/api";
 import { toast } from "sonner";
 import EvidenceBadge from "@/components/EvidenceBadge";
@@ -72,11 +72,36 @@ export default function AskPanel({ projectId, docs }) {
             data-testid={`ask-answer-${i}`}
             className="rounded-lg border border-[color:var(--jm-border)] bg-[color:var(--jm-reading)] p-5"
           >
-            <div className="flex items-center gap-2 mb-2">
+            <div className="flex items-center flex-wrap gap-2 mb-2">
               <span className="text-[10px] uppercase tracking-[0.2em] font-semibold text-[color:var(--jm-text-3)]">
                 {t("ask.question")}
               </span>
               <EvidenceBadge tier={item.overall_tier} label={`${t("ask.overall")}: ${item.overall_tier}`} />
+              {(item.model_used || item.persona_used) && (
+                <span
+                  data-testid={`ask-attribution-${i}`}
+                  className="inline-flex items-center gap-1.5 text-[10px] font-ui text-[color:var(--jm-text-3)]"
+                >
+                  <Sparkles className="w-3 h-3" />
+                  <span className="uppercase tracking-[0.16em]">{t("ask.via")}</span>
+                  {item.model_used && (
+                    <span
+                      data-testid={`ask-attribution-model-${i}`}
+                      className="px-1.5 py-0.5 rounded bg-[color:var(--jm-sidebar)] text-[color:var(--jm-text-2)] font-semibold"
+                    >
+                      {item.model_used}
+                    </span>
+                  )}
+                  {item.persona_used && (
+                    <span
+                      data-testid={`ask-attribution-persona-${i}`}
+                      className="px-1.5 py-0.5 rounded bg-[color:var(--jm-sidebar)] text-[color:var(--jm-text-2)] font-semibold"
+                    >
+                      {item.persona_used}
+                    </span>
+                  )}
+                </span>
+              )}
             </div>
             <h4 className="font-display text-lg font-semibold text-[color:var(--jm-text)] leading-tight mb-3">
               {item.question}

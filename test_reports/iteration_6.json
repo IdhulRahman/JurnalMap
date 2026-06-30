@@ -1,0 +1,49 @@
+{
+  "summary": "Iteration 6 testing covering all 8 review items: PATCH /api/documents/{id} validation + persistence + matrix_cache sync, AskResponse model_used+persona_used (body + openapi schema), Reader title edit (Enter/Esc/empty), ProjectPage row title edit (save+cancel), AskPanel attribution chips (newest-first), CSV header localized labels. Backend: 12/12 new pytest cases PASS in 58s. Regression iter3+iter4+iter5: 17/18 PASS — 1 flaky failure (test_iteration3::test_put_theme_persists) is a known parallel race on the shared settings singleton when iter3+iter5 run in parallel (xdist LoadScope across files); the test passes when iter3 runs alone. Not a regression of iter6 code. Frontend: row+reader inline edit PATCH /api/documents/{id} verified, Enter saves, Esc cancels, empty stays in edit mode, 'Title updated' toast shows. AskPanel after two questions shows ask-attribution-0 (model=gemini-3-flash-preview, persona=akademisi_ketat) plus older ask-attribution-1 — newest-first ordering. CSV header reads 'journal,Objective,Method,Sample,Key finding,Limitation,Objective — excerpt,...,Objective — page,...' — confirmed NO '__excerpt'/'__page' remain.",
+  "backend_issues": {
+    "critical": [],
+    "minor": []
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": []
+  },
+  "feature_verification": {
+    "patch_document_title": {"status": "PASS", "details": "PATCH /api/documents/{id} {title:'Brand New Title'} -> 200 with updated DocumentMeta. GET /documents/{id} and /documents/{id}/summary both reflect new title. Empty/whitespace -> 400 with 'must not be empty'. Unknown id -> 404. Extra unknown fields (e.g. {foo:'bar', status:'error'}) -> 200 (silently ignored; status stayed 'ready'). Title 800 chars truncated to 500."},
+    "matrix_cache_title_sync": {"status": "PASS", "details": "POST /api/projects/{pid}/matrix refresh:true populates cache; PATCH title for one doc; subsequent POST /matrix refresh:false returns row.title = new title — matrix_cache documents updated in-place (no LLM re-run)."},
+    "ask_attribution_backend": {"status": "PASS", "details": "AskResponse openapi schema has model_used+persona_used. POST /ask returns model_used='gemini-3-flash-preview' + persona_used='akademisi_ketat'. After PUT /settings persona_id='penulis_cepat', next /ask returns persona_used='penulis_cepat'. Settings restored to default."},
+    "frontend_reader_title_edit": {"status": "PASS", "details": "Route /project/:pid/doc/:did renders reader-title-value+edit pencil. Click pencil -> reader-title-input visible. Type new title + Enter -> PATCH /api/documents/{id} called, static text now shows new title, 'Title updated' toast shows. Esc keeps original title (no save). Saving empty string keeps the input in edit mode (still rendered)."},
+    "frontend_projectpage_row_edit": {"status": "PASS", "details": "edit-title-<docId>-value/edit/input/save/cancel all present. Save updates row text via local state (no full reload). Cancel after typing reverts to last-saved value. Round-trip persists (API PATCH 200 confirmed)."},
+    "frontend_askpanel_attribution": {"status": "PASS", "details": "After Q1 ask-attribution-0 shows model=gemini-3-flash-preview, persona=akademisi_ketat. After Q2, two ask-attribution-* nodes exist; ask-attribution-0 is the newest (history newest-first)."},
+    "frontend_csv_header_labels": {"status": "PASS", "details": "Header line: 'journal,Objective,Method,Sample,Key finding,Limitation,Objective — excerpt,Method — excerpt,Sample — excerpt,Key finding — excerpt,Limitation — excerpt,Objective — page,Method — page,Sample — page,Key finding — page,Limitation — page'. NO '__excerpt' or '__page' anywhere. Em-dash separators used."},
+    "regression_iter3_iter4_iter5": {"status": "PARTIAL", "details": "17/18 PASS. iter3::test_put_theme_persists failed only when run in parallel (xdist) with iter5 which also PUTs settings. The settings doc is a singleton so concurrent writes race. Test passes when iter3 runs alone (verified). Not introduced by iter6."}
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_iteration6.py",
+    "/app/test_reports/pytest/iteration6.xml",
+    "/app/test_reports/pytest/iteration6_regression.xml"
+  ],
+  "action_items": [
+    "Optional: serialize iter3 and iter5 setting tests, or scope them to dedicated settings keys per test file, to remove the flaky parallel race on /api/settings."
+  ],
+  "critical_code_review_comments": [
+    "server.py:update_document — accepts only DocumentTitleUpdate so extra unknown fields in request body are silently ignored (Pydantic default behaviour). Matches the agent-to-agent note: 'additional fields should be ignored, not 400'. Good.",
+    "server.py:update_document — also updates db.matrix_cache.update_many for this document_id so cached matrix rows show the new title without re-running the LLM. Clean approach.",
+    "schemas.py:DocumentTitleUpdate — minimal model (title:str). Truncation+empty check live in the route handler. Acceptable; alternative would be a Pydantic Field(max_length=500) validator but route-level truncation is friendlier UX.",
+    "exportMatrix.matrixToCsv — now accepts suffixes={excerpt, page} (default English) and the header reads '<Label> — <suffix>'. MatrixView passes t('matrix.csv.excerpt')/t('matrix.csv.page') so Indonesian users see 'kutipan'/'halaman'. The legacy '__excerpt'/'__page' headers are fully gone.",
+    "AskResponse — model_used+persona_used are Optional[str] with None default; server.py supplies fallbacks (`res.get('model_used') or model_id`, `res.get('persona_used') or settings.get('persona_id')`) so chips never come back empty.",
+    "EditableTitle — Enter saves, Esc cancels, empty keeps edit. Reader version's PATCH is fired from api.updateDocumentTitle. Frontend never blocks on whitespace-only client-side; server still rejects with 400 — fine but the toast text for that case is 'Tersimpan' could be 'Judul tidak boleh kosong' for symmetry. Cosmetic.",
+    "ProjectPage row's EditableTitle keeps local state for instant feedback (good); a reload then re-fetches from backend so persistence is verified across navigations."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_iteration6.py (new — 12 cases across 3 classes + module fixtures)"
+  ],
+  "success_rate": {"backend": "100% (12/12 new); regression 17/18 (1 flaky parallel race, not iter6-caused)", "frontend": "100% (reader edit + row edit + ask attribution + CSV header all PASS)"},
+  "test_credentials": "N/A — single-user app, no auth.",
+  "seed_data_creation": "Module-scoped fixture creates 'TEST_iter6' project + two synthetic PDFs (paperA, paperB). Both reach status=ready before tests run. Teardown deletes project (cascades docs/sentences/claims/matrix_cache + uploaded files). UI tests reused existing 'testing 1' project (doc dcacf8f8-... restored to 'My New Edited Title' after each edit).",
+  "retest_needed": false,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "Frontend SPA route is /project/:id (singular), NOT /projects/:id. Document reader is at /project/:projectId/doc/:docId. Matrix CSV export requires clicking [data-testid='matrix-generate'] first to populate the table before [data-testid='matrix-export-csv'] appears. AskPanel input is [data-testid='ask-input'] (an <input>, not a textarea). Test uses requests directly (no auth). EMERGENT_LLM_KEY is configured. Be aware of the singleton settings race when running pytest with xdist across iter3+iter5+iter6 in parallel.",
+  "rca of the issue": "N/A — no bugs found in this iteration."
+}

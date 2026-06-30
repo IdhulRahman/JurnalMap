@@ -215,4 +215,10 @@ class AskResponse(BaseModel):
     answer: str
     citations: List[Citation]
     overall_tier: Literal["high", "medium", "low"]
+    model_used: Optional[str] = None
+    persona_used: Optional[str] = None
     created_at: str = Field(default_factory=utcnow_iso)
+
+
+class DocumentTitleUpdate(BaseModel):
+    title: str
