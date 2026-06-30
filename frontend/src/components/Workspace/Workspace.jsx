@@ -7,6 +7,7 @@ import OutlineSidebar from "./OutlineSidebar";
 import SynthesisEditor from "./SynthesisEditor";
 import ReferenceManager from "./ReferenceManager";
 import EvidenceDetector from "./EvidenceDetector";
+import FindSourceDialog from "./FindSourceDialog";
 import {
   htmlToMarkdown,
   htmlToPlainText,
@@ -24,6 +25,8 @@ export default function Workspace({ projectId, docs }) {
   const [activeBadge, setActiveBadge] = useState(null);
   const [saveStatus, setSaveStatus] = useState({}); // {subId: "saved"|"dirty"|"saving"}
   const [formatChangedWarning, setFormatChangedWarning] = useState(false);
+  const [allowSubsub, setAllowSubsub] = useState(false);
+  const [findSourceDialog, setFindSourceDialog] = useState({ open: false, text: "" });
 
   const saveTimerRef = useRef(null);
   const lastSavedRef = useRef({});
@@ -209,6 +212,7 @@ export default function Workspace({ projectId, docs }) {
     try {
       const res = await api.workspaceGenerate(projectId, {
         subchapter_id: activeSubId,
+        allow_subsubchapter: allowSubsub,
       });
       const next = {
         content: res.content || "",
@@ -344,6 +348,9 @@ export default function Workspace({ projectId, docs }) {
           initialBadges={activeContent?.badges || []}
           generating={generating}
           saveStatus={saveStatus[activeSubId]}
+          allowSubsub={allowSubsub}
+          onToggleSubsub={setAllowSubsub}
+          onFindSource={(text) => setFindSourceDialog({ open: true, text })}
           onGenerate={onGenerate}
           onChange={(payload) => onChangeContent(activeSubId, payload)}
           onBadgeClick={(b) => setActiveBadge(b)}
@@ -362,6 +369,28 @@ export default function Workspace({ projectId, docs }) {
         />
         <EvidenceDetector projectId={projectId} badge={activeBadge} />
       </div>
+      <FindSourceDialog
+        open={findSourceDialog.open}
+        onOpenChange={(o) => setFindSourceDialog((s) => ({ ...s, open: o }))}
+        projectId={projectId}
+        text={findSourceDialog.text}
+        onConfirm={async (source) => {
+          // Convert source -> badge via insert-badge endpoint to compute label
+          try {
+            const res = await api.workspaceInsertBadge(projectId, {
+              subchapter_id: activeSubId,
+              document_id: source.document_id,
+              sentence_id: source.sentence_id,
+              quote: source.quote,
+              page: source.page,
+            });
+            insertBadgeIntoEditor(activeSubId, res.badge);
+            toast.success("Sitasi disisipkan dari sumber yang ditemukan");
+          } catch {
+            toast.error("Gagal menyisipkan sitasi");
+          }
+        }}
+      />
     </div>
   );
 }

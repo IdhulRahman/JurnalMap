@@ -11,6 +11,9 @@ import {
   List as ListIcon,
   CheckCircle2,
   CircleDot,
+  Search,
+  ToggleLeft,
+  ToggleRight,
 } from "lucide-react";
 import { toast } from "sonner";
 import {
@@ -41,6 +44,9 @@ export default function SynthesisEditor({
   saveStatus,
   onExportMarkdown,
   onExportText,
+  allowSubsub,
+  onToggleSubsub,
+  onFindSource,
 }) {
   const editorRef = useRef(null);
   const lastEmittedHtmlRef = useRef("");
@@ -214,6 +220,36 @@ export default function SynthesisEditor({
             title="Bullet list"
           >
             <ListIcon className="w-3.5 h-3.5" />
+          </button>
+          <span className="w-px h-4 bg-[color:var(--jm-border)] mx-1" />
+          <button
+            data-testid="workspace-toggle-subsub"
+            onClick={() => onToggleSubsub?.(!allowSubsub)}
+            className={`px-2 py-1 rounded-md text-[10px] uppercase tracking-[0.16em] font-semibold font-ui flex items-center gap-1 transition-colors ${
+              allowSubsub
+                ? "bg-[color:var(--jm-text)] text-[color:var(--jm-bg)]"
+                : "bg-[color:var(--jm-sidebar)] text-[color:var(--jm-text-2)] hover:bg-[color:var(--jm-reading)]"
+            }`}
+            title="Izinkan AI membuat sub-sub-bab internal saat Generate"
+          >
+            {allowSubsub ? <ToggleRight className="w-3.5 h-3.5" /> : <ToggleLeft className="w-3.5 h-3.5" />}
+            Sub-sub-bab: {allowSubsub ? "ON" : "OFF"}
+          </button>
+          <button
+            data-testid="workspace-find-source-btn"
+            onClick={() => {
+              const sel = window.getSelection();
+              const sText = sel ? sel.toString().trim() : "";
+              if (!sText || sText.length < 5) {
+                toast.info("Seleksi minimal sebuah kalimat di editor terlebih dahulu.");
+                return;
+              }
+              onFindSource?.(sText);
+            }}
+            className="px-2 py-1 rounded-md text-[10px] uppercase tracking-[0.16em] font-semibold font-ui flex items-center gap-1 bg-[color:var(--jm-sidebar)] text-[color:var(--jm-text-2)] hover:bg-[color:var(--jm-reading)]"
+            title="Seleksi kalimat di editor lalu klik untuk mencari sumber yang mendukung"
+          >
+            <Search className="w-3.5 h-3.5" /> Cari Sumber
           </button>
           <span className="w-px h-4 bg-[color:var(--jm-border)] mx-1" />
           <button

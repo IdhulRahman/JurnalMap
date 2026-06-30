@@ -54,7 +54,7 @@ from app.services.evidence_service import find_evidence
 from app.services.outlier_service import compute_outliers
 from app.services.matrix_service import extract_row, fields_for
 from app.services.qa_service import answer_question
-from app.services.synthesis_service import generate_subchapter, CITATION_FORMATS
+from app.services.synthesis_service import generate_subchapter, find_supporting_source, CITATION_FORMATS
 from app.services.llm import split_provider_model, emergent_key, default_model, LLMJSONError
 
 
@@ -70,6 +70,8 @@ api = APIRouter(prefix="/api")
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
 logger = logging.getLogger("jurnalmap")
+
+_IEEE_LABEL_RE = __import__("re").compile(r"^\[(\d+)\]$")
 
 
 # ---- Helpers ----
@@ -661,6 +663,31 @@ async def workspace_generate(project_id: str, payload: dict = Body(...)):
         settings = {**settings, "persona_id": payload["persona"]}
     provider, model_id = split_provider_model(model_id, settings)
 
+    allow_sub = bool(payload.get("allow_subsubchapter", False))
+
+    # Build existing citation map from prior workspace_contents badges across this project.
+    # This guarantees a document keeps the same IEEE number across the whole draft.
+    existing_map: dict = {}
+    prior_contents = await db.workspace_contents.find(
+        {"project_id": project_id}, {"_id": 0, "subchapter_id": 1, "badges": 1, "citation_map": 1}
+    ).to_list(500)
+    # Prefer a stored citation_map if any sub-chapter has one (highest numbers win merge).
+    for pc in prior_contents:
+        if pc.get("subchapter_id") == subchapter_id:
+            continue  # we are regenerating this one — its badges will be replaced
+        for did, num in (pc.get("citation_map") or {}).items():
+            if isinstance(num, int) and (did not in existing_map or num < existing_map[did]):
+                existing_map[did] = num
+        # Also infer from badges' label like "[N]" when citation_map missing
+        for b in pc.get("badges") or []:
+            did = b.get("document_id")
+            label = (b.get("label") or "").strip()
+            m = _IEEE_LABEL_RE.match(label)
+            if did and m:
+                num = int(m.group(1))
+                if did not in existing_map:
+                    existing_map[did] = num
+
     # Sliding-window: if previous_paragraph not provided, try to compute it from
     # the most recent subchapter's stored content (flattened order, take subchapter
     # that appears just before this one).
@@ -692,6 +719,8 @@ async def workspace_generate(project_id: str, payload: dict = Body(...)):
             project_documents=project_documents,
             citation_format=outline.get("citation_format") or "ieee",
             previous_paragraph=previous_paragraph,
+            allow_subsubchapter=allow_sub,
+            existing_citation_map=existing_map,
             user_settings=settings,
             provider=provider,
             model=model_id,
@@ -708,6 +737,7 @@ async def workspace_generate(project_id: str, payload: dict = Body(...)):
         "badges": result["badges"],
         "references_used": result["references_used"],
         "citation_format": outline.get("citation_format") or "ieee",
+        "citation_map": result.get("citation_map") or {},
         "updated_at": utcnow_iso(),
     }
     await db.workspace_contents.update_one(
@@ -826,16 +856,25 @@ async def workspace_insert_badge(project_id: str, payload: dict = Body(...)):
     label = payload.get("label")
     if not label:
         if fmt == "ieee":
-            # Use position in references_used so far for this content
-            existing = await db.workspace_contents.find_one(
-                {"project_id": project_id, "subchapter_id": subchapter_id}, {"_id": 0}
-            )
-            refs = (existing or {}).get("references_used") or []
-            existing_ids = [r["document_id"] for r in refs]
-            if document_id in existing_ids:
-                num = existing_ids.index(document_id) + 1
+            # Aggregate citation_map across ALL workspace_contents for this project
+            # (not just the target sub-chapter) so the same paper keeps a consistent number.
+            all_contents = await db.workspace_contents.find(
+                {"project_id": project_id}, {"_id": 0, "subchapter_id": 1, "badges": 1, "citation_map": 1}
+            ).to_list(500)
+            global_map: dict = {}
+            for pc in all_contents:
+                for did, num in (pc.get("citation_map") or {}).items():
+                    if isinstance(num, int) and (did not in global_map or num < global_map[did]):
+                        global_map[did] = num
+                for b in pc.get("badges") or []:
+                    did2 = b.get("document_id")
+                    m = _IEEE_LABEL_RE.match((b.get("label") or "").strip())
+                    if did2 and m and did2 not in global_map:
+                        global_map[did2] = int(m.group(1))
+            if document_id in global_map:
+                num = global_map[document_id]
             else:
-                num = len(existing_ids) + 1
+                num = (max(global_map.values()) + 1) if global_map else 1
             label = f"[{num}]"
         elif fmt == "apa7":
             label = f"({d.get('authors') or 'Anon'}, {d.get('year') or 'n.d.'})"
@@ -854,6 +893,93 @@ async def workspace_insert_badge(project_id: str, payload: dict = Body(...)):
         "year": d.get("year") or "",
     }
     return {"badge": badge, "citation_format": fmt}
+
+
+@api.post("/projects/{project_id}/workspace/find-source")
+async def workspace_find_source(project_id: str, payload: dict = Body(...)):
+    """Find the best supporting sentence for a user-typed claim via BM25 across project docs."""
+    await _project_or_404(project_id)
+    text = (payload.get("text") or "").strip()
+    if not text:
+        raise HTTPException(400, "text is required")
+    docs = await db.documents.find(
+        {"project_id": project_id, "status": "ready"}, {"_id": 0}
+    ).to_list(500)
+    project_documents = []
+    for d in docs:
+        sents = await db.sentences.find({"document_id": d["id"]}, {"_id": 0}).to_list(5000)
+        project_documents.append({
+            "id": d["id"],
+            "title": d.get("title") or d.get("filename"),
+            "authors": d.get("authors") or "",
+            "year": d.get("year") or "",
+            "sentences": sents,
+        })
+    if not project_documents:
+        return {"found": False, "reason": "no-documents"}
+    hit = find_supporting_source(text, project_documents)
+    if not hit:
+        return {"found": False, "reason": "no-match"}
+    return {"found": True, "source": hit}
+
+
+@api.post("/settings/test-api-key")
+async def settings_test_api_key(payload: dict = Body(...)):
+    """Smoke-test a user-provided API key by issuing a single tiny generation."""
+    provider = (payload.get("provider") or "").lower().strip()
+    api_key = (payload.get("api_key") or "").strip()
+    model = (payload.get("model") or "").strip()
+    if provider not in ("gemini", "openai", "anthropic", "local"):
+        raise HTTPException(400, "provider must be gemini, openai, anthropic, or local")
+    if provider != "local" and not api_key:
+        raise HTTPException(400, "api_key is required")
+
+    default_models = {
+        "gemini": "gemini-3-flash-preview",
+        "openai": "gpt-5.4-mini",
+        "anthropic": "claude-haiku-4-5",
+    }
+
+    # Build a one-off settings dict so resolve_key prefers the provided key
+    fake_settings = {
+        f"{provider}_key": api_key,
+    }
+    if provider == "local":
+        endpoint = (payload.get("endpoint") or "").strip()
+        if not endpoint:
+            raise HTTPException(400, "endpoint is required for local provider")
+        fake_settings["local_endpoint"] = endpoint
+        fake_settings["local_api_key"] = api_key or "ollama"
+        fake_settings["local_model"] = model or "llama3.1:8b"
+        used_model = fake_settings["local_model"]
+    else:
+        used_model = model or default_models[provider]
+
+    try:
+        from app.services.llm import generate as llm_generate
+        text = await llm_generate(
+            f"keytest-{uuid.uuid4().hex[:6]}",
+            "You are a connectivity probe. Reply with the single word OK.",
+            "Respond with OK only.",
+            provider=provider,
+            model=used_model,
+            user_settings=fake_settings,
+            want_json=False,
+        )
+        sample = (text or "").strip().split("\n")[0][:80]
+        return {
+            "ok": True,
+            "provider": provider,
+            "model": used_model,
+            "sample": sample or "(empty response)",
+        }
+    except Exception as e:  # noqa: BLE001
+        return {
+            "ok": False,
+            "provider": provider,
+            "model": used_model,
+            "error": str(e)[:300],
+        }
 
 
 # ---- Mount ----

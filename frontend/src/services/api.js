@@ -87,4 +87,10 @@ export const api = {
     http
       .post(`/projects/${projectId}/workspace/insert-badge`, payload)
       .then((r) => r.data),
+  workspaceFindSource: (projectId, text) =>
+    http
+      .post(`/projects/${projectId}/workspace/find-source`, { text })
+      .then((r) => r.data),
+  testApiKey: (payload) =>
+    http.post(`/settings/test-api-key`, payload).then((r) => r.data),
 };
