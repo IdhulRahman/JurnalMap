@@ -52,7 +52,7 @@ from app.services.evidence_service import find_evidence
 from app.services.outlier_service import compute_outliers
 from app.services.matrix_service import extract_row
 from app.services.qa_service import answer_question
-from app.services.llm import split_provider_model, emergent_key, default_model
+from app.services.llm import split_provider_model, emergent_key, default_model, LLMJSONError
 
 
 UPLOAD_DIR = Path(os.environ.get("UPLOAD_DIR", str(ROOT_DIR / "uploads")))
@@ -355,13 +355,19 @@ async def resummarize(document_id: str, model: Optional[str] = None, payload: di
             settings["persona_custom"] = payload.get("persona_custom") or ""
     model_id = model or settings.get("default_model") or default_model()
     provider, model_id = split_provider_model(model_id)
-    await regenerate_summary(
-        db,
-        document_id,
-        user_settings=settings,
-        provider=provider,
-        model=model_id,
-    )
+    try:
+        await regenerate_summary(
+            db,
+            document_id,
+            user_settings=settings,
+            provider=provider,
+            model=model_id,
+        )
+    except LLMJSONError as e:
+        raise HTTPException(
+            status_code=502,
+            detail=f"Model '{model_id}' returned malformed JSON. Please try another model. ({e})",
+        )
     return await get_summary(document_id)
 
 

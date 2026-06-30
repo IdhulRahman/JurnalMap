@@ -105,8 +105,13 @@ export default function SummaryPanel({ docId, summary, claims, sections, modelUs
       onHighlight([], null);
       toast.success("Ringkasan diperbarui");
       onResummarized?.(r);
-    } catch {
-      toast.error("Gagal meringkas ulang");
+    } catch (e) {
+      const msg = e?.response?.data?.detail;
+      if (e?.response?.status === 502 && msg) {
+        toast.error(msg, { duration: 6000 });
+      } else {
+        toast.error("Gagal meringkas ulang");
+      }
     } finally {
       setResummarizing(false);
     }

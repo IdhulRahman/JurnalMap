@@ -181,7 +181,14 @@ class TestResummarize:
         target = "gpt-5.4-mini" if original_model and "gpt" not in (original_model or "") else "claude-haiku-4-5"
         r = S.post(f"{API}/documents/{ready_doc['id']}/summarize",
                    params={"model": target}, json={})
-        assert r.status_code == 200, r.text
+        # New hardened endpoint: 200 on success, 502 if model returns malformed JSON
+        assert r.status_code in (200, 502), r.text
+        if r.status_code == 502:
+            body = r.json()
+            assert "detail" in body
+            assert "malformed JSON" in body["detail"], body
+            assert target in body["detail"], body
+            return
         d = r.json()
         assert d.get("model_used"), "model_used missing"
         # claim ids should change (recreated)

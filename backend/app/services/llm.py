@@ -76,6 +76,39 @@ async def generate(
 _JSON_BLOCK = re.compile(r"\{.*\}|\[.*\]", re.S)
 
 
+class LLMJSONError(ValueError):
+    """Raised when the LLM returns text that we cannot recover as valid JSON."""
+
+
+def _try_parse_json(raw: str) -> Any:
+    raw = raw.strip()
+    if raw.startswith("```"):
+        raw = re.sub(r"^```(?:json)?\s*", "", raw)
+        raw = re.sub(r"\s*```$", "", raw)
+    # Attempt 1: as-is
+    try:
+        return json.loads(raw)
+    except json.JSONDecodeError:
+        pass
+    # Attempt 2: extract first JSON block
+    match = _JSON_BLOCK.search(raw)
+    if match:
+        block = match.group(0)
+        try:
+            return json.loads(block)
+        except json.JSONDecodeError:
+            # Attempt 3: light repair — drop trailing commas before } / ]
+            repaired = re.sub(r",(\s*[}\]])", r"\1", block)
+            try:
+                return json.loads(repaired)
+            except json.JSONDecodeError:
+                pass
+    raise LLMJSONError(
+        "LLM returned text that could not be parsed as JSON. "
+        "Try another model or simplify the request."
+    )
+
+
 async def generate_json(
     session_id: str,
     system: str,
@@ -85,23 +118,14 @@ async def generate_json(
     model: Optional[str] = None,
     user_settings: Optional[dict] = None,
 ) -> Any:
-    """Force the model to output JSON, parse and return."""
+    """Force the model to output JSON, parse and return. Raises LLMJSONError on failure."""
     sys = (
         system
-        + "\n\nYou MUST respond with valid JSON only. No prose, no markdown fences."
+        + "\n\nYou MUST respond with valid JSON only. No prose, no markdown fences, "
+        + "no trailing commas, no comments."
     )
     raw = await generate(session_id, sys, user, provider=provider, model=model, user_settings=user_settings)
-    raw = raw.strip()
-    if raw.startswith("```"):
-        raw = re.sub(r"^```(?:json)?\s*", "", raw)
-        raw = re.sub(r"\s*```$", "", raw)
-    try:
-        return json.loads(raw)
-    except Exception:
-        match = _JSON_BLOCK.search(raw)
-        if match:
-            return json.loads(match.group(0))
-        raise
+    return _try_parse_json(raw)
 
 
 # ---- Persona handling ----
