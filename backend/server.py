@@ -125,6 +125,7 @@ async def delete_project(project_id: str):
     if doc_ids:
         await db.sentences.delete_many({"document_id": {"$in": doc_ids}})
         await db.claims.delete_many({"document_id": {"$in": doc_ids}})
+        await db.matrix_cache.delete_many({"document_id": {"$in": doc_ids}})
         # remove files
         for did in doc_ids:
             fp = UPLOAD_DIR / f"{did}.pdf"
@@ -183,6 +184,7 @@ async def delete_document(document_id: str):
     d = await _document_or_404(document_id)
     await db.sentences.delete_many({"document_id": document_id})
     await db.claims.delete_many({"document_id": document_id})
+    await db.matrix_cache.delete_many({"document_id": document_id})
     await db.documents.delete_one({"id": document_id})
     fp = UPLOAD_DIR / f"{document_id}.pdf"
     if fp.exists():
@@ -247,7 +249,11 @@ async def project_outliers(project_id: str):
 
 # ---- Matrix ----
 @api.post("/projects/{project_id}/matrix", response_model=MatrixResponse)
-async def build_matrix(project_id: str, document_ids: Optional[List[str]] = Body(default=None, embed=True)):
+async def build_matrix(
+    project_id: str,
+    document_ids: Optional[List[str]] = Body(default=None, embed=True),
+    refresh: bool = Body(default=False, embed=True),
+):
     await _project_or_404(project_id)
     query = {"project_id": project_id, "status": "ready"}
     if document_ids:
@@ -256,8 +262,24 @@ async def build_matrix(project_id: str, document_ids: Optional[List[str]] = Body
     rows = []
     fields: List[str] = []
     for d in docs:
-        sents = await db.sentences.find({"document_id": d["id"]}, {"_id": 0}).to_list(5000)
-        row = await extract_row(d["id"], d.get("title") or d.get("filename"), sents)
+        title = d.get("title") or d.get("filename")
+        cached = None if refresh else await db.matrix_cache.find_one({"document_id": d["id"]}, {"_id": 0})
+        if cached and isinstance(cached.get("cells"), list) and cached["cells"]:
+            row = {"document_id": d["id"], "title": title, "cells": cached["cells"]}
+        else:
+            sents = await db.sentences.find({"document_id": d["id"]}, {"_id": 0}).to_list(5000)
+            row = await extract_row(d["id"], title, sents)
+            # persist
+            await db.matrix_cache.update_one(
+                {"document_id": d["id"]},
+                {"$set": {
+                    "document_id": d["id"],
+                    "title": title,
+                    "cells": row["cells"],
+                    "cached_at": utcnow_iso(),
+                }},
+                upsert=True,
+            )
         if not fields and row["cells"]:
             fields = [c["field"] for c in row["cells"]]
         rows.append(MatrixRow(document_id=row["document_id"], title=row["title"],

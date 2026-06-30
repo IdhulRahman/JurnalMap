@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { Grid3x3, Loader2, Quote } from "lucide-react";
+import { Grid3x3, Loader2, Quote, RefreshCw } from "lucide-react";
 import { api } from "@/services/api";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
@@ -11,12 +11,13 @@ export default function MatrixView({ projectId, docs }) {
   const [loading, setLoading] = useState(false);
   const [activeCell, setActiveCell] = useState(null); // {rowIdx, field, excerpt, page}
 
-  const generate = async () => {
+  const generate = async (refresh = false) => {
     setLoading(true);
     setActiveCell(null);
     try {
-      const r = await api.matrix(projectId);
+      const r = await api.matrix(projectId, null, refresh);
       setData(r);
+      if (refresh) toast.success("Matriks diperbarui dari LLM");
     } catch {
       toast.error("Gagal menyusun matriks");
     } finally {
@@ -35,13 +36,25 @@ export default function MatrixView({ projectId, docs }) {
         </div>
         <Button
           data-testid="matrix-generate"
-          onClick={generate}
+          onClick={() => generate(false)}
           disabled={loading || ready.length === 0}
           className="bg-[color:var(--jm-text)] text-white hover:bg-[#343a40] gap-2"
         >
           {loading ? <Loader2 className="w-4 h-4 animate-spin" /> : <Grid3x3 className="w-4 h-4" />}
-          {data ? "Susun ulang" : "Susun matriks"}
+          {data ? "Tampilkan lagi" : "Susun matriks"}
         </Button>
+        {data && (
+          <Button
+            data-testid="matrix-refresh"
+            onClick={() => generate(true)}
+            disabled={loading}
+            variant="outline"
+            className="border-[color:var(--jm-border)] gap-2 ml-2"
+            title="Hitung ulang dengan LLM (abaikan cache)"
+          >
+            <RefreshCw className="w-4 h-4" /> Hitung ulang
+          </Button>
+        )}
       </div>
 
       {!data ? (

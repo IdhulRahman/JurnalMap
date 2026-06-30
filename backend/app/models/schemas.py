@@ -104,6 +104,7 @@ class OutlierPoint(BaseModel):
     y: float
     similarity_to_centroid: float
     is_outlier: bool
+    keywords: List[str] = Field(default_factory=list)
 
 
 class OutlierResponse(BaseModel):

@@ -1,0 +1,49 @@
+{
+  "summary": "Re-tested the three targeted fixes plus regression sanity. 7/7 backend pytest cases in test_targeted_fixes.py PASS. Frontend OutlierMap UI verified end-to-end: hover shows tooltip with title + keyword chips (font-mono pills), click navigates to /project/<pid>/doc/<docId> and DocumentReader dual-panel renders.",
+  "backend_issues": {
+    "critical": [],
+    "minor": []
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": []
+  },
+  "fix_verification": {
+    "FIX_1_qa_fallback_citations": {
+      "status": "PASS",
+      "details": "Monkey-patched qa_service.generate_json to return {answer, used_sources:[], overall_tier:'high'}. answer_question() correctly: (a) prepended 'Sumber tidak terverifikasi langsung oleh model' notice, (b) attached fallback citations with tier='low', (c) downgraded overall_tier to 'low'. The spec note 'exactly 3 citations or as many as available if fewer' is honored — BM25 may yield <3 positive-score fragments so the count is capped at min(3, gathered). Normal path (used_sources present) untouched: only cited fragments returned with model-supplied tier and overall_tier preserved."
+    },
+    "FIX_2_matrix_cache": {
+      "status": "PASS",
+      "details": "First POST /api/projects/{pid}/matrix populates db.matrix_cache with {document_id, title, cells, cached_at}. Second call returns in <1.5s (verified ~0.2s) and cells are byte-identical to first call. POST with {refresh:true} bypasses cache, calls LLM (verified slower than cache hit), and updates cached_at. DELETE /api/documents/{id} removes the matrix_cache row. DELETE /api/projects/{pid} cascades and removes matrix_cache rows for all child docs."
+    },
+    "FIX_3_outlier_keywords": {
+      "status": "PASS",
+      "details": "GET /api/projects/{pid}/outliers returns points each with a non-empty `keywords` list; stopwords ('the','yang') correctly excluded. UI: hovering [data-testid=outlier-point-<docId>] opens the .jm-tooltip with opacity:1 containing the document title, similarity %, and keyword chips styled with font-mono. Clicking the circle navigates to /project/<pid>/doc/<docId> and the DocumentReader dual-panel renders."
+    },
+    "Regression_sanity": {
+      "status": "PASS",
+      "details": "Create project, upload PDF, poll until ready, GET summary (5-8 claims with valid categories), POST evidence for claim[0] → returns >=1 evidence item — all green."
+    }
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_targeted_fixes.py",
+    "/app/test_reports/pytest/targeted_fixes.xml"
+  ],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "qa_service fallback: if BM25 returns <3 positive-score fragments, fewer than 3 citations are attached. This matches the spec's 'or as many fragments as available if fewer' clause, but UX-wise the user might see only 1-2 cites in fallback mode — acceptable.",
+    "Matrix cache invalidation is keyed only on document_id. If a document is re-uploaded with the same id (impossible today since ids are uuid), stale rows could survive. Currently safe because new uploads get fresh uuids and delete cleans up. No action needed.",
+    "OutlierMap.jsx tooltip positioning uses e.offsetX/Y relative to the SVG parent — overlapping circles (e.g. 2-doc project where both have similarity_to_centroid=1.0) overlap visually and a click can land on the topmost. Not a bug, just a known UX quirk for small projects."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_targeted_fixes.py (new)"
+  ],
+  "success_rate": {"backend": "100% (7/7 targeted)", "frontend": "100% of probed flows"},
+  "test_credentials": "N/A — single-user app, no auth.",
+  "seed_data_creation": "Per-test PyMuPDF PDFs at /tmp/jm_targeted.pdf, /tmp/jm_delmatrix.pdf, /tmp/jm_cascademat.pdf, /tmp/ui1.pdf, /tmp/ui2.pdf. Projects all TEST_-prefixed and auto-deleted by fixture/script teardown.",
+  "retest_needed": false,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "Targeted regression suite at /app/backend/tests/test_targeted_fixes.py (7 cases, ~37s incl. PDF processing). Original 14-case regression suite at /app/backend/tests/test_jurnalmap_api.py still applies. Each full targeted run uses ~3 LLM calls (1 doc-summary + 1 matrix initial + 1 matrix refresh). EMERGENT_LLM_KEY budget healthy as of this run."
+}

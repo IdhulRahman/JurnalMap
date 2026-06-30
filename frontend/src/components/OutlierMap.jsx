@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from "react";
+import { useNavigate, useParams } from "react-router-dom";
 import * as d3 from "d3";
 import { Loader2, Compass, RefreshCw } from "lucide-react";
 import { api } from "@/services/api";
@@ -8,6 +9,9 @@ export default function OutlierMap({ projectId, docs }) {
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(false);
   const svgRef = useRef(null);
+  const nav = useNavigate();
+  const params = useParams();
+  const pid = projectId || params?.id;
 
   const load = async () => {
     if (!docs || docs.filter((d) => d.status === "ready").length === 0) {
@@ -27,7 +31,7 @@ export default function OutlierMap({ projectId, docs }) {
 
   useEffect(() => {
     load();
-  }, [projectId, docs.filter((d) => d.status === "ready").length]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [projectId, docs.filter((d) => d.status === "ready").length, docs.map((d) => d.id).join(",")]);
 
   // D3 render
   useEffect(() => {
@@ -104,14 +108,17 @@ export default function OutlierMap({ projectId, docs }) {
       .style("cursor", "pointer")
       .on("mouseenter", function (e, d) {
         d3.select(this).transition().duration(150).attr("r", 12);
+        const kw = (d.keywords || []).slice(0, 6);
         tooltip
           .style("opacity", 1)
           .style("left", `${e.offsetX + 12}px`)
           .style("top", `${e.offsetY + 12}px`)
           .html(
-            `<div class="font-ui text-xs font-semibold text-[color:var(--jm-text)] max-w-[240px]">${d.title}</div>
+            `<div class="font-ui text-xs font-semibold text-[color:var(--jm-text)] max-w-[260px] leading-tight">${d.title}</div>
              <div class="text-[10px] text-[color:var(--jm-text-3)] mt-1">Kemiripan: ${(d.similarity_to_centroid * 100).toFixed(1)}%</div>
-             ${d.is_outlier ? '<div class="text-[10px] text-[color:var(--jm-low-fg)] font-semibold mt-1">OUTLIER — periksa relevansi</div>' : ""}`,
+             ${kw.length ? `<div class="mt-1.5 flex flex-wrap gap-1 max-w-[260px]">${kw.map((k) => `<span class="text-[10px] font-mono px-1.5 py-0.5 rounded bg-[color:var(--jm-sidebar)] text-[color:var(--jm-text-2)]">${k}</span>`).join("")}</div>` : ""}
+             ${d.is_outlier ? '<div class="text-[10px] text-[color:var(--jm-low-fg)] font-semibold mt-1.5">OUTLIER — periksa relevansi</div>' : ""}
+             <div class="text-[10px] text-[color:var(--jm-text-3)] mt-1.5 italic">Klik untuk buka jurnal →</div>`,
           );
       })
       .on("mousemove", function (e) {
@@ -120,8 +127,11 @@ export default function OutlierMap({ projectId, docs }) {
       .on("mouseleave", function () {
         d3.select(this).transition().duration(150).attr("r", 9);
         tooltip.style("opacity", 0);
+      })
+      .on("click", function (e, d) {
+        nav(`/project/${pid}/doc/${d.document_id}`);
       });
-  }, [data]);
+  }, [data, nav, pid]);
 
   return (
     <section

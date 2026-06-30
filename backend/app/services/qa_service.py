@@ -97,9 +97,31 @@ async def answer_question(
     if overall not in ("high", "medium", "low"):
         overall = "medium"
 
+    answer_text = (data.get("answer") or "").strip() or "Tidak ada jawaban yang dapat disusun."
+
+    # Fallback: model returned an answer but forgot to list used_sources.
+    # Without citations, the verify-by-click flow is broken — attach the top-3 BM25
+    # fragments and flag the answer as not directly verified by the model.
+    if not citations and gathered:
+        fallback_notice = (
+            "Sumber tidak terverifikasi langsung oleh model — "
+            "ditampilkan 3 fragmen paling relevan dari hasil pencarian.\n\n"
+        )
+        answer_text = fallback_notice + answer_text
+        for i, g in enumerate(gathered[:3]):
+            citations.append({
+                "document_id": g["doc_id"],
+                "document_title": g["doc_title"],
+                "sentence_id": g["sentence"]["id"],
+                "page": g["sentence"]["page"],
+                "excerpt": g["sentence"]["text"],
+                "tier": "low",
+            })
+        overall = "low"
+
     return {
         "question": question,
-        "answer": (data.get("answer") or "").strip() or "Tidak ada jawaban yang dapat disusun.",
+        "answer": answer_text,
         "citations": citations,
         "overall_tier": overall,
     }

@@ -7,6 +7,41 @@ import math
 from .retrieval import doc_vector, cosine
 
 
+# Stopwords (English + Indonesian) used when extracting dominant keywords
+_STOPWORDS = {
+    # English
+    "the", "a", "an", "is", "are", "was", "were", "be", "been", "being",
+    "and", "or", "but", "of", "in", "on", "at", "to", "for", "with", "by",
+    "from", "as", "this", "that", "these", "those", "it", "its", "we",
+    "our", "they", "their", "he", "she", "him", "her", "his", "you", "your",
+    "i", "me", "my", "not", "no", "so", "than", "then", "such", "also",
+    "have", "has", "had", "do", "does", "did", "can", "could", "would",
+    "should", "may", "might", "will", "shall", "if", "while", "when",
+    "where", "what", "which", "who", "how", "all", "any", "some", "more",
+    "most", "other", "into", "about", "between", "over", "under",
+    # Indonesian
+    "yang", "dan", "atau", "tetapi", "namun", "untuk", "pada", "di", "ke",
+    "dari", "dengan", "dalam", "oleh", "tidak", "adalah", "ini", "itu",
+    "saya", "kami", "kita", "kamu", "anda", "mereka", "akan", "telah",
+    "sudah", "juga", "jika", "agar", "supaya", "karena", "sehingga",
+    "bahwa", "sebagai", "antara", "lebih", "paling", "sangat",
+    # Common in academic text
+    "study", "studies", "paper", "article", "results", "result", "method",
+    "methods", "found", "show", "shows", "showed", "based", "using",
+    "use", "used", "one", "two", "three", "table", "figure", "et", "al",
+}
+
+
+def _dominant_keywords(tf: Dict[str, float], k: int = 6) -> List[str]:
+    items = [
+        (tok, w)
+        for tok, w in tf.items()
+        if len(tok) >= 4 and not tok.isdigit() and tok not in _STOPWORDS
+    ]
+    items.sort(key=lambda x: x[1], reverse=True)
+    return [tok for tok, _ in items[:k]]
+
+
 def compute_outliers(documents: List[Dict[str, Any]]) -> Dict[str, Any]:
     """documents: [{id, title, sentences: [...]}]. Returns {points, summary}."""
     if len(documents) == 0:
@@ -26,6 +61,7 @@ def compute_outliers(documents: List[Dict[str, Any]]) -> Dict[str, Any]:
                     "y": 0.5,
                     "similarity_to_centroid": 1.0,
                     "is_outlier": False,
+                    "keywords": _dominant_keywords(vectors[0]),
                 }
             ],
             "summary": "Hanya satu dokumen, deteksi outlier butuh minimal 2.",
@@ -59,6 +95,7 @@ def compute_outliers(documents: List[Dict[str, Any]]) -> Dict[str, Any]:
                 "y": float(y),
                 "similarity_to_centroid": float(sims[i]),
                 "is_outlier": bool(is_outlier),
+                "keywords": _dominant_keywords(vectors[i]),
             }
         )
 
