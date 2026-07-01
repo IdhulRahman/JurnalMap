@@ -1,283 +1,172 @@
-# JurnalMap
+# JurnalMap — Verifiable Literature Analysis
 
-Platform analisis jurnal ilmiah berbasis AI. Upload PDF jurnal ilmiah, lalu sistem akan merangkum, mengekstrak klaim, mencari evidence, membangun comparison matrix, menjawab pertanyaan, dan memverifikasi teks AI — semuanya menggunakan berbagai LLM (Gemini, OpenAI, Anthropic, atau model lokal via Ollama).
+> **AI menulis, JurnalMap memverifikasi.**
+> Alat bantu peneliti untuk mengunggah puluhan PDF jurnal ilmiah, membangun peta hubungan antar-paper, meringkas dengan sitasi bukti, mengekstrak matriks perbandingan, menjawab pertanyaan bebas, dan memeriksa teks yang ditulis AI terhadap literatur sumber — semuanya dengan **evidence-first design**: setiap klaim dapat diklik untuk menuju kalimat asalnya.
 
-**Fitur utama (versi ini):**
-
-- 📄 Upload multi-PDF dengan **antrean pemrosesan satu-per-satu** (menampilkan status *Menunggu (2/5)…* dan *Memproses (1/5)…*).
-- 🔁 Tombol **Proses Kembali** untuk file yang gagal.
-- 🧠 **Ringkasan on-demand** — teks diekstrak otomatis, tetapi LLM baru dipanggil saat pengguna menekan tombol *Ringkas*.
-- 🌐 **Peta Penelitian (Network Graph)** — otomatis terbentuk di Tab Baca ketika ≥ 2 jurnal siap. Composite score = `0.5·semantic + 0.3·keyword + 0.2·topic`.
-- 🌗 **Tema Terang / Gelap / Sistem** (di navbar & Settings).
-- 🌍 **Pemilihan bahasa keluaran per fitur** (Ringkasan, Tanya Pustaka).
-- ⚙️ Model AI **hanya disediakan oleh administrator** (via env). Pengguna tidak lagi menginput API key.
+![Evidence, not verdicts](https://img.shields.io/badge/philosophy-evidence--first-black)
+![Docker](https://img.shields.io/badge/deploy-docker--compose-blue)
+![License](https://img.shields.io/badge/status-MVP-orange)
 
 ---
 
-## 🏗️ Arsitektur
+## Value Proposition
 
-```
-Browser (React 19) ──HTTP──▶ FastAPI (Uvicorn) ──Motor──▶ MongoDB
-                                   │
-                              app/services/
-                              ├── pdf_parser.py            (PyMuPDF)
-                              ├── document_processor.py   (parse-only)
-                              ├── queue.py                (single-worker FIFO)
-                              ├── network_service.py      (composite similarity)
-                              ├── llm.py                  (Emergent / OpenAI / Anthropic / Local)
-                              ├── summary_service.py
-                              ├── evidence_service.py
-                              ├── matrix_service.py
-                              ├── qa_service.py
-                              └── verification_service.py
-```
+Sebagian besar tool riset AI hanya menghasilkan ringkasan yang **tampak** meyakinkan tapi sulit diverifikasi. JurnalMap membalik urutannya: ringkasan, jawaban, dan matriks perbandingan **selalu** memuat sitasi klik-ke-sumber. Anda melihat kalimat asli dengan sorotan tepat sebelum mempercayai jawaban AI. Ini penting saat literatur review dijadikan dasar keputusan penelitian atau publikasi.
 
 ---
 
-## 🚀 Menjalankan dengan Docker
+## 🌟 Fitur Utama (6 Tab)
+
+| Tab | Deskripsi |
+|:--|:--|
+| **📄 Pustaka** | Daftar dokumen dengan pill status antrean (`Menunggu 2/5…`, `Memproses 1/5…`), tombol *Proses Kembali* untuk file gagal, dan integrasi drag-and-drop multi-file. |
+| **📖 Baca + Network Graph** | Reader PDF di kiri, ringkasan on-demand + klaim + evidence di kanan. Di bagian atas: **Peta Penelitian** otomatis dengan node = paper, edge = composite similarity > 0.7. |
+| **📊 Matriks** | Tabel perbandingan lintas paper untuk objective / method / dataset / results / limitations. Klik sel → evidence dengan halaman PDF. |
+| **💬 Tanya** | Multi-doc QA berbasis retrieval + LLM. Pilih bahasa jawaban (Indonesia / English). Setiap jawaban disertai sitasi angka yang bisa diklik. |
+| **🔍 Check & Fix** | Tempel teks yang ditulis AI (misal ChatGPT) + daftar pustaka opsional. JurnalMap mendeteksi klaim tanpa sitasi, klaim yang bertentangan dengan literatur (NLI), dan menyarankan perbaikan. |
+| **⚙️ Settings** | Tema (Terang/Gelap/Sistem), bahasa antarmuka, persona LLM, ganti password. Daftar model **read-only** karena model disediakan administrator. |
+
+---
+
+## 🥇 Kelebihan dibanding Tools Lain
+
+- **Klik-to-source evidence.** Setiap klaim, kalimat ringkasan, dan sitasi jawaban dapat diklik untuk melihat kalimat asli dari PDF, lengkap dengan nomor halaman. Bukan sekadar hyperlink — ada highlight & confidence tier (high/medium/low).
+- **Deteksi kontradiksi NLI.** Modul *Check & Fix* menggunakan reasoning untuk menandai klaim yang **berlawanan** dengan literatur, bukan sekadar sitasi hilang.
+- **Multi-bahasa native.** Semantic similarity via `paraphrase-multilingual-MiniLM-L12-v2` (atau BGE-M3) mendukung Bahasa Indonesia + English tanpa translation layer. Output ringkasan/jawaban dapat dipilih per fitur.
+- **Composite similarity graph.** Peta Penelitian menggabungkan tiga sinyal (`0.5 · semantic + 0.3 · keyword_jaccard + 0.2 · topic_match`) untuk mengungkap kelompok tematik & outlier — lebih tahan noise dibanding cosine murni.
+- **Admin-controlled models.** Peneliti/mahasiswa **tidak perlu punya API key sendiri**. Institusi mengonfigurasi model (cloud atau Ollama lokal) sekali di server.
+- **Queue satu-per-satu yang persisten.** Tidak butuh Celery/Redis — worker asyncio di MongoDB, resume otomatis setelah restart.
+
+---
+
+## 🛠️ Tech Stack
+
+| Layer | Teknologi |
+|:--|:--|
+| **Frontend** | React 19 (CRA), Tailwind CSS v3, shadcn/ui, D3.js (force-directed graph), Sonner (toasts), React Router v6 |
+| **Backend** | FastAPI 0.110, Uvicorn, Motor (async MongoDB), Pydantic v2, PyMuPDF, rank_bm25 |
+| **AI** | Emergent Universal LLM Key (Gemini/OpenAI/Anthropic) atau vendor key native, sentence-transformers, `openai` SDK untuk Ollama compat |
+| **Storage** | MongoDB 7.0, disk volume untuk uploads + model cache |
+| **Auth** | JWT (python-jose) + bcrypt, password lockout policy |
+| **Deploy** | Docker Compose (frontend Nginx, backend Uvicorn, mongo, opsional ollama) |
+
+---
+
+## 🚀 Cara Deploy dengan Docker
+
+### Quick Start
 
 ```bash
-# 1. Clone repository
 git clone <repo-url> jurnalmap && cd jurnalmap
-
-# 2. Copy template environment file
 cp .env.example .env
-#    Edit .env: set EMERGENT_LLM_KEY atau vendor key, JWT_SECRET_KEY, dsb.
-
-# 3. Build & jalankan (menggunakan MongoDB, backend, frontend)
-docker-compose up -d --build
-
-# 4. Buka aplikasi
-open http://localhost:3000
-
-# 5. (Opsional) Aktifkan Ollama untuk local LLM
-docker-compose --profile ollama up -d
-docker exec -it jurnalmap-ollama ollama pull gemma:2b
-#    Lalu di .env set: LOCAL_LLM_ENABLED=true, LOCAL_LLM_NAME=gemma:2b
-docker-compose restart backend
-```
-
-Model embedding untuk Network Graph diatur di `.env`:
-```
-EMBEDDING_ENABLED=true
-EMBEDDING_MODEL=paraphrase-multilingual-MiniLM-L12-v2   # atau BAAI/bge-m3
-```
-
-
----
-
-## 🚀 Cara Menjalankan dengan Docker (Production)
-
-### Prasyarat
-
-- [Docker](https://docs.docker.com/get-docker/) ≥ 24
-- [Docker Compose](https://docs.docker.com/compose/install/) V2
-
-### Langkah
-
-**1. Clone repository:**
-```bash
-git clone https://github.com/IdhulRahman/JurnalMap1.git
-cd JurnalMap1
-```
-
-**2. Siapkan file `.env`:**
-```bash
-cp .env.example .env
-```
-
-Edit `.env` dan isi nilai yang diperlukan:
-```bash
-# Wajib diisi:
-MONGO_INITDB_ROOT_PASSWORD=your_strong_password_here
-EMERGENT_LLM_KEY=your_emergent_api_key_here
-REACT_APP_BACKEND_URL=http://localhost:8001   # atau URL domain Anda
-CORS_ORIGINS=http://localhost:3000            # atau domain frontend Anda
-```
-
-**3. Build dan jalankan:**
-```bash
+# Edit .env: isi EMERGENT_LLM_KEY, JWT_SECRET_KEY, ADMIN_PASSWORD
 docker compose up -d --build
+open http://localhost:3000
+# Login: admin / <ADMIN_PASSWORD>
 ```
 
-**4. Cek status:**
+Verifikasi:
+
 ```bash
-docker compose ps
-# Semua service harus menampilkan status "healthy"
-
-docker compose logs -f backend   # lihat log backend
+curl http://localhost:8001/api/                    # {"app":"JurnalMap","status":"ok"}
+curl http://localhost:8001/api/config | jq         # model list dari administrator
+docker compose ps                                  # semua service harus healthy
 ```
 
-**5. Akses aplikasi:**
-- **Frontend:** [http://localhost:3000](http://localhost:3000)
-- **Backend API:** [http://localhost:8001/api/](http://localhost:8001/api/)
-- **API Docs (Swagger):** [http://localhost:8001/docs](http://localhost:8001/docs)
+### Opsi Ollama (Local LLM)
 
-**6. Hentikan aplikasi:**
 ```bash
-docker compose down          # hentikan (data tetap tersimpan)
-docker compose down -v       # hentikan + hapus semua data (HATI-HATI!)
+docker compose --profile ollama up -d
+docker compose exec ollama ollama pull llama3.1:8b
+# .env: LOCAL_LLM_ENABLED=true, LOCAL_LLM_NAME=llama3.1:8b
+docker compose restart backend
 ```
+
+Model `llama3.1:8b (administrator)` akan otomatis tersedia di dropdown Ringkasan/Tanya.
+
+Panduan deploy lengkap: lihat `DEPLOY.md` atau `docker-compose.yml`.
 
 ---
 
-## 💻 Cara Menjalankan Tanpa Docker (Development)
+## 🧪 Testing Manual (ringkasan)
 
-### Prasyarat
+Setelah deploy, jalankan sanity check ini secara berurutan:
 
-- Python 3.11+
-- Node.js 20+
-- Yarn 1.22+
-- MongoDB 7.0 (lokal atau MongoDB Atlas)
+1. **Autentikasi.** Register akun baru → login/logout → coba 3× password salah, verifikasi lockout 30s.
+2. **Upload & Queue.** Upload 3 PDF sekaligus, pastikan pill `Menunggu (2/3)…`, `Memproses (1/3)…` benar. Setelah semua Siap, tombol **Proses Kembali** muncul bila 1 file gagal (uji dengan menghapus file fisik dari volume `backend-uploads` lalu retry).
+3. **Ringkasan on-demand.** Buka doc siap → panel kanan menampilkan placeholder "Klik tombol Ringkas". Pilih bahasa, klik **Ringkas** → summary muncul dengan attribution model.
+4. **Network Graph.** Dengan ≥ 2 doc siap, verifikasi *Peta Penelitian* muncul otomatis di Tab Baca. Klik edge → tooltip semantic/keyword/topic. Klik node → buka Tab Baca doc.
+5. **Tanya.** Ajukan 1 pertanyaan bahasa Indonesia, ubah dropdown ke English, ajukan lagi. Verifikasi bahasa jawaban.
+6. **Check & Fix.** Tempel teks + daftar pustaka → klik **Periksa Sekarang** → badge sitasi ▲ ✓ ✗ muncul.
+7. **Tema.** Toggle Terang → Gelap → Sistem via ikon navbar. Verifikasi update tanpa reload.
+8. **Navigasi Tab.** Kunjungi semua 6 tab, pastikan tidak ada error di console browser.
 
-### Backend
-
-```bash
-# 1. Masuk ke folder backend
-cd backend
-
-# 2. Buat virtual environment
-python -m venv venv
-source venv/bin/activate       # Linux/Mac
-# atau
-venv\Scripts\activate          # Windows
-
-# 3. Install dependencies
-pip install -r requirements.txt
-pip install openai>=1.0.0      # Diperlukan untuk local LLM
-
-# 4. Buat file .env di folder backend/
-cat > .env << EOF
-MONGO_URL=mongodb://localhost:27017/jurnalmap
-DB_NAME=jurnalmap
-EMERGENT_LLM_KEY=your_emergent_llm_key_here
-CORS_ORIGINS=http://localhost:3000
-UPLOAD_DIR=./uploads
-EOF
-
-# 5. Jalankan server
-uvicorn server:app --host 0.0.0.0 --port 8001 --reload
-```
-
-Backend berjalan di: [http://localhost:8001](http://localhost:8001)
-
-### Frontend
-
-```bash
-# 1. Masuk ke folder frontend
-cd frontend
-
-# 2. Buat file .env di folder frontend/
-cat > .env << EOF
-REACT_APP_BACKEND_URL=http://localhost:8001
-EOF
-
-# 3. Install dependencies
-yarn install
-
-# 4. Jalankan development server
-yarn start
-```
-
-Frontend berjalan di: [http://localhost:3000](http://localhost:3000)
+Panduan lengkap step-by-step: lihat `TESTING.md`.
 
 ---
 
-## 🧪 Cara Menjalankan Tests
+## ⚙️ Konfigurasi Environment (`.env.example`)
 
-### Backend Tests
+Variabel yang wajib diisi ditandai **WAJIB**. Sisanya punya default aman.
 
-Tests memerlukan backend yang sedang berjalan dan database MongoDB.
-
-```bash
-# 1. Install test dependencies
-pip install pytest pytest-xdist requests pymupdf python-dotenv
-
-# 2. Pastikan backend berjalan (lihat di atas)
-
-# 3. Jalankan tests
-cd backend
-REACT_APP_BACKEND_URL=http://localhost:8001 pytest tests/ -v
-
-# Jalankan test spesifik:
-pytest tests/test_jurnalmap_api.py -v
-
-# Jalankan dengan lebih banyak output:
-pytest tests/ -v -s --no-header
-```
-
-**Catatan:** Tests adalah end-to-end integration tests. Setiap test akan membuat data nyata di database dan memerlukan koneksi LLM yang valid.
-
-### Frontend Tests
-
-Belum ada frontend tests. Untuk menjalankan test runner kosong:
-```bash
-cd frontend
-yarn test --watchAll=false
-```
+| Variabel | Wajib | Default | Keterangan |
+|:--|:-:|:--|:--|
+| `EMERGENT_LLM_KEY` | **✅** | — | Kunci universal Emergent untuk Gemini/OpenAI/Anthropic. Alternatif: `GEMINI_API_KEY` / `OPENAI_API_KEY` / `ANTHROPIC_API_KEY`. |
+| `JWT_SECRET_KEY` | **✅** | — | Rahasia untuk JWT. Gunakan `openssl rand -hex 32`. |
+| `ADMIN_USERNAME` | | `admin` | Akun admin yang di-seed saat startup. |
+| `ADMIN_PASSWORD` | **✅** | `admin` | **Wajib ubah di production.** |
+| `ADMIN_EMAIL` | | `admin@jurnalmap.local` | Email untuk forgot-password flow. |
+| `LLM_PROVIDER` | | `gemini` | `gemini` \| `openai` \| `anthropic` \| `local`. |
+| `LLM_MODEL` | | `gemini-2.0-flash` | Model default yang tampil di dropdown. |
+| `LOCAL_LLM_ENABLED` | | `false` | `true` untuk mengekspos Ollama/vLLM. |
+| `LOCAL_LLM_NAME` | | `gemma-llm` | Nama model lokal (mis. `llama3.1:8b`). Muncul di dropdown. |
+| `LOCAL_LLM_ENDPOINT` | | `http://ollama:11434/v1` | Endpoint OpenAI-compatible. |
+| `EMBEDDING_ENABLED` | | `true` | `false` = fallback ke TF-cosine (ringan tapi kurang akurat). |
+| `EMBEDDING_MODEL` | | `paraphrase-multilingual-MiniLM-L12-v2` | Pilihan lain: `intfloat/multilingual-e5-small`, `BAAI/bge-m3`. |
+| `MONGO_INITDB_ROOT_USERNAME/PASSWORD` | | `admin` / `changeme` | Kredensial root Mongo. |
+| `DB_NAME` | | `jurnalmap` | Nama database. |
+| `MAX_FILES_PER_UPLOAD` | | `5` | Batas file per POST upload. |
+| `MAX_UPLOAD_SIZE_MB` | | `50` | Batas ukuran per file. |
+| `QUEUE_POLL_INTERVAL` | | `1.5` | Detik antara polling worker antrean. |
+| `FRONTEND_PORT` / `BACKEND_PORT` | | `3000` / `8001` | Ubah bila konflik. |
+| `REACT_APP_BACKEND_URL` | **✅** | `http://localhost:8001` | Baked ke bundle saat frontend di-build. Wajib benar sebelum `docker compose build`. |
+| `CORS_ORIGINS` | | `*` | Di production: batasi ke domain frontend saja. |
 
 ---
 
-## 🌍 Environment Variables
-
-### Backend (file `backend/.env` atau environment Docker)
-
-| Variable | Wajib | Default | Deskripsi |
-|----------|-------|---------|-----------|
-| `MONGO_URL` | ✅ | — | MongoDB connection string |
-| `DB_NAME` | ✅ | — | Nama database MongoDB |
-| `EMERGENT_LLM_KEY` | ✅* | — | API key Emergent (*jika tidak ada user key) |
-| `CORS_ORIGINS` | ✅ | `*` | Allowed origins, pisahkan dengan koma |
-| `UPLOAD_DIR` | ❌ | `./uploads` | Path folder PDF uploads |
-| `LLM_PROVIDER` | ❌ | `gemini` | Default LLM provider |
-| `LLM_MODEL` | ❌ | `gemini-3-flash-preview` | Default LLM model |
-
-### Frontend (baked saat build)
-
-| Variable | Wajib | Deskripsi |
-|----------|-------|-----------|
-| `REACT_APP_BACKEND_URL` | ✅ | URL backend API (harus accessible dari browser) |
-
-> **⚠️ Penting:** `REACT_APP_BACKEND_URL` di-bake ke dalam JavaScript bundle saat `yarn build`. Jika URL berubah, frontend harus di-rebuild.
-
----
-
-## 📁 Struktur Project
+## 📂 Struktur Proyek
 
 ```
-JurnalMap1/
+jurnalmap/
 ├── backend/
 │   ├── app/
-│   │   ├── models/
-│   │   │   └── schemas.py          # Pydantic models
+│   │   ├── api/                    # (reserved for future routers)
+│   │   ├── models/schemas.py       # Pydantic models
 │   │   └── services/
-│   │       ├── llm.py              # LLM adapter
-│   │       ├── document_processor.py
+│   │       ├── auth_service.py
+│   │       ├── document_processor.py   # parse-only (queue worker calls this)
+│   │       ├── queue.py                # single-worker FIFO async loop
+│   │       ├── pdf_parser.py           # PyMuPDF
+│   │       ├── retrieval.py            # BM25 + TF cosine
+│   │       ├── network_service.py      # composite similarity graph
 │   │       ├── summary_service.py
 │   │       ├── evidence_service.py
-│   │       ├── outlier_service.py
 │   │       ├── matrix_service.py
 │   │       ├── qa_service.py
-│   │       ├── verification_service.py
-│   │       ├── pdf_parser.py
-│   │       └── retrieval.py
-│   ├── tests/                      # Backend integration tests
-│   ├── uploads/                    # PDF files (gitignored)
-│   ├── server.py                   # FastAPI entry point
+│   │       ├── verification_service.py # Check & Fix (NLI)
+│   │       ├── outlier_service.py      # legacy — not used in UI
+│   │       └── llm.py                  # provider routing
 │   ├── requirements.txt
-│   ├── pytest.ini
 │   └── Dockerfile
 ├── frontend/
 │   ├── src/
-│   │   ├── pages/                  # ProjectsPage, ProjectPage, etc.
-│   │   ├── components/             # UI components
-│   │   ├── services/api.js         # Axios API client
-│   │   ├── store/settings.jsx      # Settings context
-│   │   └── App.js
-│   ├── public/
+│   │   ├── App.js
+│   │   ├── pages/                  # LoginPage, ProjectPage, DocumentReader, SettingsPage, ...
+│   │   ├── components/             # SummaryPanel, AskPanel, NetworkGraph, MatrixView, CheckFix/, ...
+│   │   ├── services/api.js
+│   │   ├── store/                  # auth, settings (theme, ui_language)
+│   │   └── lib/                    # i18n, useT, featureLanguage
 │   ├── package.json
-│   ├── craco.config.js
-│   ├── nginx.conf                  # Nginx config (production)
 │   └── Dockerfile
 ├── docker-compose.yml
 ├── .env.example
@@ -286,50 +175,21 @@ JurnalMap1/
 
 ---
 
-## 🐳 Docker — Tips Production
+## 🔒 Keamanan
 
-### Ganti URL backend setelah deploy
-
-Jika domain backend berubah, rebuild frontend image dengan build arg baru:
-```bash
-docker compose build --build-arg REACT_APP_BACKEND_URL=https://api.yourdomain.com frontend
-docker compose up -d frontend
-```
-
-### Lihat logs
-
-```bash
-docker compose logs -f              # semua services
-docker compose logs -f backend      # backend saja
-docker compose logs -f mongo        # MongoDB saja
-```
-
-### Akses MongoDB shell
-
-```bash
-docker compose exec mongo mongosh \
-  -u admin -p your_password \
-  --authenticationDatabase admin \
-  jurnalmap
-```
-
-### Backup MongoDB
-
-```bash
-docker compose exec mongo mongodump \
-  -u admin -p your_password \
-  --authenticationDatabase admin \
-  --db jurnalmap \
-  --out /tmp/backup
-
-docker cp jurnalmap-mongo:/tmp/backup ./backup-$(date +%Y%m%d)
-```
+- Semua endpoint (kecuali `/api/`, `/api/config`, `/api/auth/*`) memerlukan JWT.
+- Ownership per user pada projects & documents (admin bypass untuk moderasi).
+- Password minimal 8 karakter, wajib huruf besar + digit + simbol.
+- Lockout otomatis 30 detik setelah 3 percobaan login gagal.
+- Bcrypt hash, JWT expiry 24 jam (dapat dikonfigurasi).
+- Upload dibatasi jenis PDF + ukuran maksimal (default 50MB, 5 file per batch).
 
 ---
 
-## 🛡️ Catatan Keamanan
+## 📜 Lisensi
 
-- **Autentikasi:** Aplikasi ini tidak memiliki sistem autentikasi bawaan. Untuk deployment publik, tambahkan autentikasi di layer nginx (Basic Auth) atau implementasikan JWT di backend.
-- **CORS:** Pastikan `CORS_ORIGINS` diset ke domain spesifik, bukan `*`.
-- **API Keys:** API keys pengguna (Gemini/OpenAI/Anthropic) disimpan di MongoDB. Untuk keamanan lebih tinggi, enkripsi keys sebelum menyimpan.
-- **HTTPS:** Gunakan HTTPS di production. Konfigurasikan TLS di reverse proxy (nginx/caddy/traefik).
+MVP internal — belum dirilis publik. Hubungi tim untuk kolaborasi.
+
+---
+
+**Motto:** *Evidence, not verdicts.*
