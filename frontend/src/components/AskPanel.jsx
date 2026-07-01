@@ -43,7 +43,7 @@ export default function AskPanel({ projectId, docs }) {
   return (
     <section
       data-testid="ask-section"
-      className="rounded-xl bg-[color:var(--jm-surface)] border border-[color:var(--jm-border)] p-5"
+      className="rounded-xl bg-[var(--jm-surface)] border-2 border-[var(--jm-border-2)] p-5"
     >
       <div className="flex items-center gap-2 text-[11px] uppercase tracking-[0.22em] font-semibold text-[color:var(--jm-text-3)] mb-3">
         <MessageSquareText className="w-3.5 h-3.5" /> {t("ask.title")}
@@ -58,7 +58,7 @@ export default function AskPanel({ projectId, docs }) {
         <Select value={language} onValueChange={setLanguage}>
           <SelectTrigger
             data-testid="ask-lang-select"
-            className="h-8 text-xs bg-[color:var(--jm-surface)] border-[color:var(--jm-border)] text-[color:var(--jm-text)] w-[144px]"
+            className="h-8 text-xs bg-[var(--jm-surface)] border-2 border-[var(--jm-border-2)] text-[color:var(--jm-text)] w-[144px]"
           >
             <SelectValue />
           </SelectTrigger>
@@ -76,13 +76,13 @@ export default function AskPanel({ projectId, docs }) {
           onChange={(e) => setQ(e.target.value)}
           onKeyDown={(e) => e.key === "Enter" && !busy && ask()}
           placeholder={t("ask.placeholder")}
-          className="flex-1 px-4 py-3 rounded-lg border border-[color:var(--jm-border)] focus:border-[color:var(--jm-text)] focus:outline-none font-ui text-sm bg-[color:var(--jm-surface)] text-[color:var(--jm-text)]"
+          className="flex-1 px-4 py-3 rounded-lg border-2 border-[var(--jm-border-2)] focus:border-[var(--jm-text)] focus:outline-none font-ui text-sm bg-[var(--jm-surface)] text-[color:var(--jm-text)]"
         />
         <button
           data-testid="ask-submit"
           onClick={ask}
           disabled={busy || !q.trim()}
-          className="px-4 py-3 rounded-lg bg-[color:var(--jm-text)] text-[color:var(--jm-bg)] hover:opacity-90 flex items-center gap-2 disabled:opacity-50 font-ui text-sm font-semibold"
+          className="px-4 py-3 rounded-lg bg-[var(--jm-focus)] text-white hover:opacity-90 flex items-center gap-2 disabled:opacity-50 font-ui text-sm font-semibold"
         >
           {busy ? <Loader2 className="w-4 h-4 animate-spin" /> : <Send className="w-4 h-4" />}
           {t("ask.submit")}
@@ -91,7 +91,7 @@ export default function AskPanel({ projectId, docs }) {
 
       <div className="mt-6 space-y-5">
         {history.length === 0 && !busy && (
-          <div className="rounded-lg border border-dashed border-[color:var(--jm-border)] p-8 text-center text-sm text-[color:var(--jm-text-3)] font-ui">
+          <div className="rounded-lg border-2 border-dashed border-[var(--jm-border-2)] p-8 text-center text-sm text-[color:var(--jm-text-3)] font-ui">
             {t("ask.empty")}
           </div>
         )}

@@ -250,7 +250,7 @@ export default function SettingsPage() {
                           setKeyTestStatus((s) => ({ ...s, [field]: null }));
                         }}
                         placeholder={settings[`has_${provider}_key`] ? "••••••••••••" : placeholder}
-                        className="pr-10 bg-[color:var(--jm-surface)] border-[color:var(--jm-border)] text-[color:var(--jm-text)] font-mono text-sm"
+                        className="pr-10 bg-[var(--jm-surface)] border-2 border-[var(--jm-border-2)] text-[color:var(--jm-text)] font-mono text-sm"
                       />
                       <button
                         type="button"
@@ -266,7 +266,7 @@ export default function SettingsPage() {
                       size="sm"
                       disabled={!keys[field].trim() || status === "testing"}
                       onClick={() => testKey(provider)}
-                      className="shrink-0 gap-1.5 border-[color:var(--jm-border)] text-[color:var(--jm-text-2)] hover:text-[color:var(--jm-text)]"
+                      className="shrink-0 gap-1.5 border-2 border-[var(--jm-border-2)] text-[color:var(--jm-text-2)] hover:text-[color:var(--jm-text)]"
                     >
                       {status === "testing" ? (
                         <Loader2 className="w-3.5 h-3.5 animate-spin" />
@@ -325,7 +325,7 @@ export default function SettingsPage() {
         <Section testId="settings-persona-section" icon={UserCircle2} title={t("settings.persona")}>
           <Select value={local.persona_id} onValueChange={(v) => setLocal((s) => ({ ...s, persona_id: v }))}>
             <SelectTrigger data-testid="persona-select"
-                           className="bg-[color:var(--jm-surface)] border-[color:var(--jm-border)] text-[color:var(--jm-text)]">
+                           className="bg-[var(--jm-surface)] border-2 border-[var(--jm-border-2)] text-[color:var(--jm-text)]">
               <SelectValue placeholder="Pilih persona" />
             </SelectTrigger>
             <SelectContent>
@@ -342,12 +342,12 @@ export default function SettingsPage() {
               <Textarea data-testid="persona-custom-input" value={local.persona_custom}
                         onChange={(e) => setLocal((s) => ({ ...s, persona_custom: e.target.value }))}
                         rows={4} placeholder={t("settings.persona.placeholder")}
-                        className="mt-1 bg-[color:var(--jm-surface)] border-[color:var(--jm-border)] text-[color:var(--jm-text)]" />
+                        className="mt-1 bg-[var(--jm-surface)] border-2 border-[var(--jm-border-2)] text-[color:var(--jm-text)]" />
             </div>
           )}
           <div className="mt-3 flex justify-end">
             <Button data-testid="settings-save-btn" onClick={savePersona} disabled={saving}
-                    className="bg-[color:var(--jm-text)] text-[color:var(--jm-bg)] hover:opacity-90 gap-2">
+                    className="bg-[var(--jm-focus)] text-white hover:opacity-90 gap-2">
               {saving ? <Loader2 className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />}
               {t("settings.save")}
             </Button>
@@ -367,7 +367,7 @@ function Section({ testId, icon: Icon, title, hint, children }) {
   return (
     <section
       data-testid={testId}
-      className="rounded-xl border border-[color:var(--jm-border)] bg-[color:var(--jm-surface)] p-6 mb-6"
+      className="rounded-xl border-2 border-[var(--jm-border-2)] bg-[var(--jm-surface)] p-6 mb-6"
     >
       <div className="flex items-center gap-2 text-[11px] uppercase tracking-[0.22em] font-semibold text-[color:var(--jm-text-3)] mb-1">
         {Icon ? <Icon className="w-3.5 h-3.5" /> : null}
@@ -384,10 +384,10 @@ function Pill({ testId, active, icon: Icon, label, onClick }) {
     <button
       data-testid={testId}
       onClick={onClick}
-      className={`px-4 py-2 rounded-md text-sm font-ui font-medium border transition-all flex items-center gap-2 ${
+      className={`px-4 py-2 rounded-md text-sm font-ui font-medium border-2 transition-all flex items-center gap-2 ${
         active
-          ? "border-[color:var(--jm-text)] bg-[color:var(--jm-text)] text-[color:var(--jm-bg)]"
-          : "border-[color:var(--jm-border)] text-[color:var(--jm-text-2)] hover:border-[color:var(--jm-border-2)] bg-[color:var(--jm-surface)]"
+          ? "border-[var(--jm-text)] bg-[var(--jm-text)] text-[var(--jm-bg)]"
+          : "border-[var(--jm-border-2)] text-[color:var(--jm-text-2)] hover:border-[var(--jm-border-2)] bg-[var(--jm-surface)]"
       }`}
     >
       {Icon ? <Icon className="w-4 h-4" /> : null}

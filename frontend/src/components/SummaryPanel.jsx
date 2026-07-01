@@ -216,7 +216,7 @@ export default function SummaryPanel({ docId, projectId, summary, claims, sectio
       {isEmpty && (
         <section
           data-testid="summary-placeholder"
-          className="rounded-lg border border-dashed border-[color:var(--jm-border)] bg-[color:var(--jm-surface)] p-8 text-center"
+          className="rounded-lg border-2 border-dashed border-[var(--jm-border-2)] bg-[var(--jm-surface)] p-8 text-center"
         >
           <BookOpenCheck className="w-8 h-8 mx-auto text-[color:var(--jm-text-3)] mb-3" />
           <p className="font-reading text-[15px] leading-relaxed text-[color:var(--jm-text-2)]">
@@ -244,10 +244,10 @@ export default function SummaryPanel({ docId, projectId, summary, claims, sectio
       </section>
 
       {/* Sections */}
-      {hasSections && (
+      {sections && (
         <section>
-          <div className="text-[10px] uppercase tracking-[0.22em] font-semibold text-[color:var(--jm-text-3)] mb-3">
-            {t("summary.sections")}
+          <div className="flex items-center gap-2 text-[10px] uppercase tracking-[0.22em] font-semibold text-[color:var(--jm-text-3)] mb-3">
+            <Layers className="w-3.5 h-3.5" /> {t("summary.sections")}
           </div>
           <div data-testid="summary-sections" className="space-y-2">
             {SECTION_ORDER.map((k) => {
@@ -262,8 +262,8 @@ export default function SummaryPanel({ docId, projectId, summary, claims, sectio
                   key={k}
                   data-testid={`section-card-${k}`}
                   onClick={() => fetchSectionEvidence(k, text)}
-                  className={`w-full text-left p-3.5 rounded-lg border transition-all
-                    ${active ? "border-[color:var(--jm-text)] bg-[color:var(--jm-reading)] shadow-sm" : "border-[color:var(--jm-border)] bg-[color:var(--jm-surface)] hover:border-[color:var(--jm-border-2)]"}`}
+                  className={`w-full text-left p-3.5 rounded-lg border-2 transition-all
+                    ${active ? "border-[var(--jm-text)] bg-[var(--jm-reading)] shadow-sm" : "border-[var(--jm-border-2)] bg-[var(--jm-surface)] hover:border-[var(--jm-border)]"}`}
                 >
                   <div className="flex items-start justify-between gap-2 mb-1.5">
                     <span className="text-[10px] uppercase tracking-[0.2em] font-semibold text-[color:var(--jm-text-3)]">
@@ -314,8 +314,8 @@ export default function SummaryPanel({ docId, projectId, summary, claims, sectio
                 <button
                   data-testid={`claim-card-${claim.id}`}
                   onClick={() => fetchClaimEvidence(claim)}
-                  className={`w-full text-left p-4 rounded-lg border transition-all
-                    ${active ? "border-[color:var(--jm-text)] bg-[color:var(--jm-reading)] shadow-sm" : "border-[color:var(--jm-border)] bg-[color:var(--jm-surface)] hover:border-[color:var(--jm-border-2)]"}`}
+                  className={`w-full text-left p-4 rounded-lg border-2 transition-all
+                    ${active ? "border-[var(--jm-text)] bg-[var(--jm-reading)] shadow-sm" : "border-[var(--jm-border-2)] bg-[var(--jm-surface)] hover:border-[var(--jm-border)]"}`}
                 >
                   <div className="flex items-start justify-between gap-3 mb-2">
                     <span className="text-[10px] uppercase tracking-[0.18em] font-semibold text-[color:var(--jm-text-3)]">
@@ -329,7 +329,7 @@ export default function SummaryPanel({ docId, projectId, summary, claims, sectio
                     {claim.text}
                   </p>
                   {active && (
-                    <div className="mt-3 pt-3 border-t border-[color:var(--jm-border)] space-y-2">
+                    <div className="mt-3 pt-3 border-t-2 border-[var(--jm-border-2)] space-y-2">
                       {busyKey === key ? (
                         <div className="flex items-center gap-2 text-xs text-[color:var(--jm-text-3)] font-ui">
                           <Loader2 className="w-3.5 h-3.5 animate-spin" /> Mencari bukti…
@@ -344,7 +344,7 @@ export default function SummaryPanel({ docId, projectId, summary, claims, sectio
                             <div
                               key={i}
                               data-testid={`evidence-item-${claim.id}-${i}`}
-                              className="rounded-md border border-[color:var(--jm-border)] bg-[color:var(--jm-surface)] p-2.5"
+                              className="rounded-md border-2 border-[var(--jm-border-2)] bg-[var(--jm-surface)] p-2.5"
                             >
                               <div className="flex items-center justify-between mb-1.5">
                                 <EvidenceBadge tier={it.tier} />

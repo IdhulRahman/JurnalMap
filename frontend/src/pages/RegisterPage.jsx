@@ -58,17 +58,17 @@ export default function RegisterPage() {
   };
 
   return (
-    <div className="min-h-screen flex items-center justify-center bg-[color:var(--jm-bg)] px-4 py-10">
+    <div className="min-h-screen flex items-center justify-center bg-[var(--jm-bg)] px-4 py-10">
       <div className="w-full max-w-md">
         <Link to="/" className="flex items-center justify-center gap-2.5 mb-8">
-          <div className="w-9 h-9 rounded-md bg-[color:var(--jm-text)] flex items-center justify-center">
-            <Layers className="w-4 h-4 text-[color:var(--jm-bg)]" strokeWidth={2.5} />
+          <div className="w-9 h-9 rounded-md bg-[var(--jm-text)] flex items-center justify-center">
+            <Layers className="w-4 h-4 text-[var(--jm-bg)]" strokeWidth={2.5} />
           </div>
           <div className="leading-tight text-left">
-            <div className="font-display text-xl tracking-tight text-[color:var(--jm-text)] font-semibold">
+            <div className="font-display text-xl tracking-tight text-[var(--jm-text)] font-semibold">
               JurnalMap
             </div>
-            <div className="text-[10px] uppercase tracking-[0.18em] text-[color:var(--jm-text-3)] font-medium">
+            <div className="text-[10px] uppercase tracking-[0.18em] text-[var(--jm-text-3)] font-medium">
               Evidence, not verdicts
             </div>
           </div>
@@ -77,7 +77,7 @@ export default function RegisterPage() {
         <form
           data-testid="register-form"
           onSubmit={submit}
-          className="rounded-2xl border border-[color:var(--jm-border)] bg-[color:var(--jm-surface)] p-8 shadow-sm"
+          className="rounded-2xl border-2 border-[var(--jm-border-2)] bg-[var(--jm-surface)] p-8 shadow-sm"
         >
           <h1 className="font-display text-2xl font-semibold text-[color:var(--jm-text)] mb-1">
             Buat akun

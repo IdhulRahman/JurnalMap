@@ -61,19 +61,34 @@ export default function NetworkGraph({ projectId, docs }) {
     const nodes = data.nodes.map((n) => ({ ...n }));
     const edges = data.edges.map((e) => ({ ...e }));
 
-    const link = svg.append("g")
+    const linkVisual = svg.append("g")
       .selectAll("line")
       .data(edges)
       .join("line")
       .attr("stroke", (d) => (d.strength === "kuat" ? "#10b981" : "#f59e0b"))
       .attr("stroke-width", (d) => (d.strength === "kuat" ? 3 : 1.8))
       .attr("stroke-opacity", (d) => (d.strength === "kuat" ? 0.8 : 0.6))
-      .attr("stroke-dasharray", (d) => (d.strength === "sedang" ? "5,5" : "none"))
-      .attr("data-testid", (d) => `net-edge-${d.source}-${d.target}`)
+      .attr("stroke-dasharray", (d) => (d.strength === "sedang" ? "5,5" : "none"));
+
+    const linkInteractive = svg.append("g")
+      .selectAll("line")
+      .data(edges)
+      .join("line")
+      .attr("stroke", "transparent")
+      .attr("stroke-width", 14)
+      .attr("stroke-opacity", 0)
       .style("cursor", "pointer")
-      .on("mouseenter", (_, d) => setSelectedEdge(d))
-      .on("mouseleave", () => setSelectedEdge(null))
-      .on("click", (_, d) => setSelectedEdge(d));
+      .on("click", (event, d) => {
+        event.stopPropagation();
+        const svgRect = svgRef.current.getBoundingClientRect();
+        const clickX = event.clientX - svgRect.left;
+        const clickY = event.clientY - svgRect.top;
+        setSelectedEdge({
+          ...d,
+          clickX,
+          clickY,
+        });
+      });
 
     const nodeG = svg.append("g")
       .selectAll("g")
@@ -85,7 +100,7 @@ export default function NetworkGraph({ projectId, docs }) {
 
     nodeG.append("circle")
       .attr("r", 14)
-      .attr("fill", (d) => (d.isolated ? "#dc2626" : "var(--jm-text)"))
+      .attr("fill", (d) => (d.isolated ? "#dc2626" : "#3b82f6"))
       .attr("fill-opacity", 0.95)
       .attr("stroke", (d) => (d.isolated ? "#fca5a5" : "var(--jm-border-2)"))
       .attr("stroke-width", (d) => (d.isolated ? 3 : 2));
@@ -116,11 +131,18 @@ export default function NetworkGraph({ projectId, docs }) {
           node.y = Math.max(25, Math.min(height - 25, node.y));
         });
 
-        link
+        linkVisual
           .attr("x1", (d) => d.source.x)
           .attr("y1", (d) => d.source.y)
           .attr("x2", (d) => d.target.x)
           .attr("y2", (d) => d.target.y);
+
+        linkInteractive
+          .attr("x1", (d) => d.source.x)
+          .attr("y1", (d) => d.source.y)
+          .attr("x2", (d) => d.target.x)
+          .attr("y2", (d) => d.target.y);
+
         nodeG.attr("transform", (d) => `translate(${d.x},${d.y})`);
       });
 
@@ -176,7 +198,11 @@ export default function NetworkGraph({ projectId, docs }) {
           {selectedEdge && (
             <div
               data-testid="network-edge-tip"
-              className="absolute bottom-3 right-3 max-w-sm rounded-lg border-2 border-[var(--jm-border-2)] bg-[var(--jm-surface)] p-3 shadow-lg text-xs font-ui"
+              className="absolute z-20 max-w-sm rounded-lg border-2 border-[var(--jm-border-2)] bg-[var(--jm-surface)] p-3 shadow-lg text-xs font-ui pointer-events-auto"
+              style={{
+                left: `${selectedEdge.clickX > (svgRef.current?.clientWidth || 400) - 280 ? selectedEdge.clickX - 270 : selectedEdge.clickX + 15}px`,
+                top: `${selectedEdge.clickY > 460 - 160 ? selectedEdge.clickY - 150 : selectedEdge.clickY + 15}px`
+              }}
             >
               <div className="flex items-center justify-between mb-1.5">
                 <span className="text-[10px] uppercase tracking-[0.18em] font-semibold text-[color:var(--jm-text-3)]">

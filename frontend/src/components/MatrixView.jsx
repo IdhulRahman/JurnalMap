@@ -96,7 +96,7 @@ export default function MatrixView({ projectId, docs }) {
   return (
     <section
       data-testid="matrix-section"
-      className="rounded-xl bg-[color:var(--jm-surface)] border border-[color:var(--jm-border)] p-5"
+      className="rounded-xl bg-[var(--jm-surface)] border-2 border-[var(--jm-border-2)] p-5"
     >
       <div className="flex flex-wrap items-center gap-3 mb-4">
         <div className="flex items-center gap-2 text-[11px] uppercase tracking-[0.22em] font-semibold text-[color:var(--jm-text-3)]">
@@ -109,7 +109,7 @@ export default function MatrixView({ projectId, docs }) {
           <Select value={method} onValueChange={setMethod}>
             <SelectTrigger
               data-testid="matrix-method-select"
-              className="h-9 text-xs bg-[color:var(--jm-surface)] border-[color:var(--jm-border)] text-[color:var(--jm-text)] min-w-[230px]"
+              className="h-9 text-xs bg-[var(--jm-surface)] border-2 border-[var(--jm-border-2)] text-[color:var(--jm-text)] min-w-[230px]"
             >
               <SelectValue />
             </SelectTrigger>
@@ -125,7 +125,7 @@ export default function MatrixView({ projectId, docs }) {
             data-testid="matrix-generate"
             onClick={() => generate(false)}
             disabled={loading || ready.length === 0}
-            className="bg-[color:var(--jm-text)] text-[color:var(--jm-bg)] hover:opacity-90 gap-2"
+            className="bg-[var(--jm-focus)] text-white hover:opacity-90 gap-2"
           >
             {loading ? <Loader2 className="w-4 h-4 animate-spin" /> : <Grid3x3 className="w-4 h-4" />}
             {data ? t("matrix.again") : t("matrix.generate")}
@@ -136,7 +136,7 @@ export default function MatrixView({ projectId, docs }) {
               onClick={() => generate(true)}
               disabled={loading}
               variant="outline"
-              className="border-[color:var(--jm-border)] gap-2"
+              className="border-2 border-[var(--jm-border-2)] gap-2"
               title={t("matrix.refresh")}
             >
               <RefreshCw className="w-4 h-4" /> {t("matrix.refresh")}

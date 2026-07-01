@@ -162,7 +162,7 @@ export default function ProjectsPage() {
           </div>
         </div>
 
-        <div className="flex items-baseline justify-between mb-6 border-t border-[color:var(--jm-border)] pt-8">
+        <div className="flex items-baseline justify-between mb-6 border-t-2 border-[var(--jm-border-2)] pt-8">
           <h2 className="font-display text-2xl sm:text-3xl tracking-tight font-semibold text-[color:var(--jm-text)]">
             {t("home.projects")}
           </h2>
@@ -174,13 +174,13 @@ export default function ProjectsPage() {
         {loading ? (
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5">
             {[1,2,3].map((i) => (
-              <div key={i} className="h-48 rounded-xl bg-[color:var(--jm-surface)] border border-[color:var(--jm-border)] animate-pulse" />
+              <div key={i} className="h-48 rounded-xl bg-[var(--jm-surface)] border-2 border-[var(--jm-border-2)] animate-pulse" />
             ))}
           </div>
         ) : projects.length === 0 ? (
           <div
             data-testid="empty-projects"
-            className="rounded-2xl border-2 border-dashed border-[color:var(--jm-border)] p-16 text-center bg-[color:var(--jm-surface)]"
+            className="rounded-2xl border-2 border-dashed border-[var(--jm-border-2)] p-16 text-center bg-[var(--jm-surface)]"
           >
             <div className="w-14 h-14 rounded-full bg-[color:var(--jm-sidebar)] mx-auto flex items-center justify-center mb-4">
               <BookOpen className="w-6 h-6 text-[color:var(--jm-text-2)]" />
@@ -194,7 +194,7 @@ export default function ProjectsPage() {
             <Button
               data-testid="empty-create-btn"
               onClick={() => setOpen(true)}
-              className="bg-[color:var(--jm-text)] text-[color:var(--jm-bg)] hover:opacity-90 gap-2"
+              className="bg-[var(--jm-focus)] text-white hover:opacity-90 gap-2"
             >
               <Plus className="w-4 h-4" /> {t("home.empty.cta")}
             </Button>
@@ -205,7 +205,7 @@ export default function ProjectsPage() {
               <div
                 key={p.id}
                 data-testid={`project-card-${p.id}`}
-                className="group relative p-6 rounded-xl border border-[color:var(--jm-border)] bg-[color:var(--jm-surface)] hover:-translate-y-0.5 hover:shadow-lg hover:border-[color:var(--jm-border-2)] transition-all"
+                className="group relative p-6 rounded-xl border-2 border-[var(--jm-border-2)] bg-[var(--jm-surface)] hover:-translate-y-0.5 hover:shadow-lg hover:border-[var(--jm-accent)] transition-all"
               >
                 <button
                   data-testid={`delete-project-${p.id}`}
@@ -224,7 +224,7 @@ export default function ProjectsPage() {
                       {p.description}
                     </p>
                   )}
-                  <div className="flex items-center justify-between text-xs text-[color:var(--jm-text-3)] font-ui pt-4 border-t border-[color:var(--jm-border)]">
+                  <div className="flex items-center justify-between text-xs text-[color:var(--jm-text-3)] font-ui pt-4 border-t-2 border-[var(--jm-border-2)]">
                     <span className="flex items-center gap-1.5">
                       <FileText className="w-3.5 h-3.5" /> {t("home.card.journals", { n: p.document_count })}
                     </span>

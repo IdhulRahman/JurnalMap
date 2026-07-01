@@ -53,7 +53,7 @@ export default function CheckFixEditor({
   return (
     <section
       data-testid="checkfix-editor"
-      className="rounded-xl border border-[color:var(--jm-border)] bg-[color:var(--jm-surface)] p-5"
+      className="rounded-xl border-2 border-[var(--jm-border-2)] bg-[var(--jm-surface)] p-5"
     >
       {/* Input area */}
       <div className="space-y-3">
@@ -67,7 +67,7 @@ export default function CheckFixEditor({
             onChange={(e) => setText(e.target.value)}
             rows={10}
             placeholder="Tempelkan paragraf atau draf hasil AI di sini... Setiap unit (paragraf / item daftar) akan diverifikasi terhadap koleksi paper Anda."
-            className="w-full px-3 py-2 rounded-md border border-[color:var(--jm-border)] focus:border-[color:var(--jm-text)] focus:outline-none font-reading text-[15px] leading-relaxed bg-[color:var(--jm-surface)] text-[color:var(--jm-text)] resize-y"
+            className="w-full px-3 py-2 rounded-md border-2 border-[var(--jm-border-2)] focus:border-[var(--jm-text)] focus:outline-none font-reading text-[15px] leading-relaxed bg-[var(--jm-surface)] text-[color:var(--jm-text)] resize-y"
           />
           <div className="mt-1 text-[10px] uppercase tracking-[0.16em] font-semibold font-ui text-[color:var(--jm-text-3)]">
             {wordCount} kata
@@ -85,10 +85,10 @@ export default function CheckFixEditor({
               onChange={(e) => setBibliography(e.target.value)}
               rows={5}
               placeholder="Tempel daftar pustaka dari ChatGPT/Claude/Gemini di sini..."
-              className="w-full px-3 py-2 rounded-md border border-[color:var(--jm-border)] focus:border-[color:var(--jm-text)] focus:outline-none font-ui text-xs leading-relaxed bg-[color:var(--jm-surface)] text-[color:var(--jm-text)] resize-y"
+              className="w-full px-3 py-2 rounded-md border-2 border-[var(--jm-border-2)] focus:border-[var(--jm-text)] focus:outline-none font-ui text-xs leading-relaxed bg-[var(--jm-surface)] text-[color:var(--jm-text)] resize-y"
             />
           </div>
-          <aside className="lg:col-span-5 rounded-md bg-[color:var(--jm-reading)] border border-[color:var(--jm-border)] p-3 text-[11px] font-ui leading-relaxed text-[color:var(--jm-text-2)]">
+          <aside className="lg:col-span-5 rounded-md bg-[color:var(--jm-reading)] border-2 border-[var(--jm-border-2)] p-3 text-[11px] font-ui leading-relaxed text-[color:var(--jm-text-2)]">
             <div className="text-[10px] uppercase tracking-[0.2em] font-semibold text-[color:var(--jm-text-3)] mb-1">
               Tips
             </div>
@@ -107,7 +107,7 @@ export default function CheckFixEditor({
             data-testid="checkfix-run-btn"
             onClick={onRun}
             disabled={running || !text.trim()}
-            className="px-4 py-2 rounded-md text-sm font-ui font-semibold flex items-center gap-2 bg-[color:var(--jm-text)] text-[color:var(--jm-bg)] hover:opacity-90 disabled:opacity-50"
+            className="px-4 py-2 rounded-md text-sm font-ui font-semibold flex items-center gap-2 bg-[var(--jm-focus)] text-white hover:opacity-90 disabled:opacity-50"
           >
             {running ? <Loader2 className="w-4 h-4 animate-spin" /> : <Sparkles className="w-4 h-4" />}
             Periksa Sekarang
@@ -117,7 +117,7 @@ export default function CheckFixEditor({
               <button
                 data-testid="checkfix-clear-btn"
                 onClick={onClear}
-                className="px-3 py-2 rounded-md text-xs font-ui font-semibold flex items-center gap-1.5 border border-[color:var(--jm-border)] hover:bg-[color:var(--jm-sidebar)]"
+                className="px-3 py-2 rounded-md text-xs font-ui font-semibold flex items-center gap-1.5 border-2 border-[var(--jm-border-2)] hover:bg-[color:var(--jm-sidebar)]"
               >
                 <Eraser className="w-3.5 h-3.5" /> Bersihkan
               </button>

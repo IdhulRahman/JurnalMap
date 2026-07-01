@@ -198,7 +198,10 @@ export default function ProjectPage() {
                     {t("project.empty")}
                   </div>
                 ) : (
-                  <ul data-testid="documents-list" className="space-y-3">
+                  <ul 
+                    data-testid="documents-list" 
+                    className="space-y-3 max-h-[390px] overflow-y-auto pr-1.5 scrollbar-thin"
+                  >
                     {docs.map((d) => (
                       <li
                         key={d.id}
@@ -232,7 +235,7 @@ export default function ProjectPage() {
                           <Link
                             data-testid={`open-doc-${d.id}`}
                             to={`/project/${id}/doc/${d.id}`}
-                            className="text-xs font-semibold text-[color:var(--jm-bg)] bg-[color:var(--jm-text)] hover:opacity-90 px-3 py-2 rounded-md transition-colors"
+                            className="text-xs font-semibold text-white bg-[var(--jm-focus)] hover:opacity-90 px-3 py-2 rounded-md transition-colors"
                           >
                             {t("common.open")}
                           </Link>
