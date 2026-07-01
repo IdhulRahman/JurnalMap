@@ -108,6 +108,14 @@ export default function NetworkGraph({ projectId, docs }) {
       .force("center", d3.forceCenter(width / 2, height / 2))
       .force("collide", d3.forceCollide(46))
       .on("tick", () => {
+        // Constrain nodes to stay inside the SVG box boundaries
+        nodes.forEach((node) => {
+          // Constrain x (allow 140px on the right for text labels)
+          node.x = Math.max(20, Math.min(width - 140, node.x));
+          // Constrain y (allow 25px top/bottom padding)
+          node.y = Math.max(25, Math.min(height - 25, node.y));
+        });
+
         link
           .attr("x1", (d) => d.source.x)
           .attr("y1", (d) => d.source.y)
