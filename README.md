@@ -24,7 +24,7 @@ Sebagian besar tool riset AI hanya menghasilkan ringkasan yang **tampak** meyaki
 | **📊 Matriks** | Tabel perbandingan lintas paper untuk objective / method / dataset / results / limitations. Klik sel → evidence dengan halaman PDF. |
 | **💬 Tanya** | Multi-doc QA berbasis retrieval + LLM. Pilih bahasa jawaban (Indonesia / English). Setiap jawaban disertai sitasi angka yang bisa diklik. |
 | **🔍 Check & Fix** | Tempel teks yang ditulis AI (misal ChatGPT) + daftar pustaka opsional. JurnalMap mendeteksi klaim tanpa sitasi, klaim yang bertentangan dengan literatur (NLI), dan menyarankan perbaikan. |
-| **⚙️ Settings** | Tema (Terang/Gelap/Sistem), bahasa antarmuka, persona LLM, ganti password. Daftar model **read-only** karena model disediakan administrator. |
+| **⚙️ Settings** | Tema (Terang/Gelap/Sistem), bahasa antarmuka, bahasa keluaran AI, konfigurasi **kunci API LLM Cloud mandiri** (Gemini, OpenAI, Anthropic), serta integrasi model lokal. |
 
 ---
 
@@ -32,10 +32,10 @@ Sebagian besar tool riset AI hanya menghasilkan ringkasan yang **tampak** meyaki
 
 - **Klik-to-source evidence.** Setiap klaim, kalimat ringkasan, dan sitasi jawaban dapat diklik untuk melihat kalimat asli dari PDF, lengkap dengan nomor halaman. Bukan sekadar hyperlink — ada highlight & confidence tier (high/medium/low).
 - **Deteksi kontradiksi NLI.** Modul *Check & Fix* menggunakan reasoning untuk menandai klaim yang **berlawanan** dengan literatur, bukan sekadar sitasi hilang.
-- **Multi-bahasa native.** Semantic similarity via `paraphrase-multilingual-MiniLM-L12-v2` (atau BGE-M3) mendukung Bahasa Indonesia + English tanpa translation layer. Output ringkasan/jawaban dapat dipilih per fitur.
+- **Multi-bahasa native.** Semantic similarity via `paraphrase-multilingual-MiniLM-L12-v2` mendukung Bahasa Indonesia + English tanpa translation layer. Output ringkasan/jawaban dapat dipilih per fitur.
 - **Composite similarity graph.** Peta Penelitian menggabungkan tiga sinyal (`0.5 · semantic + 0.3 · keyword_jaccard + 0.2 · topic_match`) untuk mengungkap kelompok tematik & outlier — lebih tahan noise dibanding cosine murni.
-- **Admin-controlled models.** Peneliti/mahasiswa **tidak perlu punya API key sendiri**. Institusi mengonfigurasi model (cloud atau Ollama lokal) sekali di server.
-- **Queue satu-per-satu yang persisten.** Tidak butuh Celery/Redis — worker asyncio di MongoDB, resume otomatis setelah restart.
+- **Keamanan Kunci API Mandiri.** API Key cloud disimpan dengan aman di database terenkripsi per pengguna, sehingga institusi tidak perlu menanggung biaya pemakaian global.
+- **Opsi Model Lokal (Admin-controlled).** Administrator dapat mengaktifkan LLM lokal (seperti Ollama / vLLM) yang dapat langsung diakses oleh seluruh pengguna tanpa konfigurasi tambahan di sisi client.
 
 ---
 
@@ -71,7 +71,7 @@ Verifikasi:
 
 ```bash
 curl http://localhost:8001/api/                    # {"app":"JurnalMap","status":"ok"}
-curl http://localhost:8001/api/config | jq         # model list dari administrator
+curl http://localhost:8001/api/config | jq         # konfigurasi publik & supported providers
 docker compose ps                                  # semua service harus healthy
 ```
 
@@ -84,26 +84,9 @@ docker compose exec ollama ollama pull llama3.1:8b
 docker compose restart backend
 ```
 
-Model `llama3.1:8b (administrator)` akan otomatis tersedia di dropdown Ringkasan/Tanya.
+Model `llama3.1:8b (local)` akan otomatis tersedia di dropdown Ringkasan/Tanya bagi seluruh user.
 
 Panduan deploy lengkap: lihat `DEPLOY.md` atau `docker-compose.yml`.
-
----
-
-## 🧪 Testing Manual (ringkasan)
-
-Setelah deploy, jalankan sanity check ini secara berurutan:
-
-1. **Autentikasi.** Register akun baru → login/logout → coba 3× password salah, verifikasi lockout 30s.
-2. **Upload & Queue.** Upload 3 PDF sekaligus, pastikan pill `Menunggu (2/3)…`, `Memproses (1/3)…` benar. Setelah semua Siap, tombol **Proses Kembali** muncul bila 1 file gagal (uji dengan menghapus file fisik dari volume `backend-uploads` lalu retry).
-3. **Ringkasan on-demand.** Buka doc siap → panel kanan menampilkan placeholder "Klik tombol Ringkas". Pilih bahasa, klik **Ringkas** → summary muncul dengan attribution model.
-4. **Network Graph.** Dengan ≥ 2 doc siap, verifikasi *Peta Penelitian* muncul otomatis di Tab Baca. Klik edge → tooltip semantic/keyword/topic. Klik node → buka Tab Baca doc.
-5. **Tanya.** Ajukan 1 pertanyaan bahasa Indonesia, ubah dropdown ke English, ajukan lagi. Verifikasi bahasa jawaban.
-6. **Check & Fix.** Tempel teks + daftar pustaka → klik **Periksa Sekarang** → badge sitasi ▲ ✓ ✗ muncul.
-7. **Tema.** Toggle Terang → Gelap → Sistem via ikon navbar. Verifikasi update tanpa reload.
-8. **Navigasi Tab.** Kunjungi semua 6 tab, pastikan tidak ada error di console browser.
-
-Panduan lengkap step-by-step: lihat `TESTING.md`.
 
 ---
 
@@ -142,7 +125,9 @@ jurnalmap/
 ├── backend/
 │   ├── app/
 │   │   ├── api/                    # (reserved for future routers)
-│   │   ├── models/schemas.py       # Pydantic models
+│   │   ├── models/
+│   │   │   ├── schemas.py          # Pydantic settings models
+│   │   │   └── user.py             # User models
 │   │   └── services/
 │   │       ├── auth_service.py
 │   │       ├── document_processor.py   # parse-only (queue worker calls this)
@@ -155,8 +140,8 @@ jurnalmap/
 │   │       ├── matrix_service.py
 │   │       ├── qa_service.py
 │   │       ├── verification_service.py # Check & Fix (NLI)
-│   │       ├── outlier_service.py      # legacy — not used in UI
-│   │       └── llm.py                  # provider routing
+│   │       ├── cache.py                # BM25 Caching
+│   │       └── llm.py                  # Gemini, OpenAI, Anthropic native adapter
 │   ├── requirements.txt
 │   └── Dockerfile
 ├── frontend/
@@ -173,8 +158,6 @@ jurnalmap/
 ├── .env.example
 └── README.md
 ```
-
----
 
 ## 🔒 Keamanan
 
