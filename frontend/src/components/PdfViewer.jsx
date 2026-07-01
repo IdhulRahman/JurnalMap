@@ -5,11 +5,8 @@ import "react-pdf/dist/Page/TextLayer.css";
 import { ZoomIn, ZoomOut, ChevronLeft, ChevronRight } from "lucide-react";
 import { TIER_META } from "@/lib/tiers";
 
-// Use pdf.js worker from same package (works in browser bundlers)
-pdfjs.GlobalWorkerOptions.workerSrc = new URL(
-  "pdfjs-dist/build/pdf.worker.min.mjs",
-  import.meta.url,
-).toString();
+// Use pdf.js worker from unpkg CDN to bypass Windows MIME type issues with .mjs in local dev server
+pdfjs.GlobalWorkerOptions.workerSrc = `https://unpkg.com/pdfjs-dist@${pdfjs.version}/build/pdf.worker.min.mjs`;
 
 /**
  * PdfViewer renders a PDF and a canvas overlay of highlight rectangles.
