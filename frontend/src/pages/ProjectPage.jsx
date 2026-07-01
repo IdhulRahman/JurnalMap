@@ -148,33 +148,33 @@ export default function ProjectPage() {
         <Tabs value={tab} onValueChange={setTab} className="w-full">
           <TabsList
             data-testid="project-tabs"
-            className="bg-[color:var(--jm-surface)] border border-[color:var(--jm-border)] p-1 rounded-lg h-auto"
+            className="bg-[var(--jm-surface)] border-2 border-[var(--jm-border-2)] p-1 rounded-lg h-auto"
           >
             <TabsTrigger
               data-testid="tab-baca"
               value="baca"
-              className="data-[state=active]:bg-[color:var(--jm-text)] data-[state=active]:text-[color:var(--jm-bg)] px-4 py-2 gap-2"
+              className="data-[state=active]:bg-[var(--jm-text)] data-[state=active]:text-[var(--jm-bg)] px-4 py-2 gap-2"
             >
               <BookOpen className="w-4 h-4" /> Pustaka
             </TabsTrigger>
             <TabsTrigger
               data-testid="tab-bandingkan"
               value="bandingkan"
-              className="data-[state=active]:bg-[color:var(--jm-text)] data-[state=active]:text-[color:var(--jm-bg)] px-4 py-2 gap-2"
+              className="data-[state=active]:bg-[var(--jm-text)] data-[state=active]:text-[var(--jm-bg)] px-4 py-2 gap-2"
             >
               <GitCompare className="w-4 h-4" /> Matriks
             </TabsTrigger>
             <TabsTrigger
               data-testid="tab-tanya"
               value="tanya"
-              className="data-[state=active]:bg-[color:var(--jm-text)] data-[state=active]:text-[color:var(--jm-bg)] px-4 py-2 gap-2"
+              className="data-[state=active]:bg-[var(--jm-text)] data-[state=active]:text-[var(--jm-bg)] px-4 py-2 gap-2"
             >
               <MessageSquareText className="w-4 h-4" /> {t("tab.ask")}
             </TabsTrigger>
             <TabsTrigger
               data-testid="tab-check-fix"
               value="check-fix"
-              className="data-[state=active]:bg-[color:var(--jm-text)] data-[state=active]:text-[color:var(--jm-bg)] px-4 py-2 gap-2"
+              className="data-[state=active]:bg-[var(--jm-text)] data-[state=active]:text-[var(--jm-bg)] px-4 py-2 gap-2"
             >
               <ShieldCheck className="w-4 h-4" /> Check & Fix
             </TabsTrigger>
@@ -194,7 +194,7 @@ export default function ProjectPage() {
                   {t("project.list")}
                 </h3>
                 {docs.length === 0 ? (
-                  <div className="rounded-xl border border-[color:var(--jm-border)] bg-[color:var(--jm-surface)] p-10 text-center text-sm text-[color:var(--jm-text-2)] font-ui">
+                  <div className="rounded-xl border-2 border-[var(--jm-border-2)] bg-[var(--jm-surface)] p-10 text-center text-sm text-[color:var(--jm-text-2)] font-ui">
                     {t("project.empty")}
                   </div>
                 ) : (
@@ -203,7 +203,7 @@ export default function ProjectPage() {
                       <li
                         key={d.id}
                         data-testid={`doc-row-${d.id}`}
-                        className="rounded-xl border border-[color:var(--jm-border)] bg-[color:var(--jm-surface)] p-4 flex items-center gap-4 hover:border-[color:var(--jm-border-2)] transition-colors"
+                        className="rounded-xl border-2 border-[var(--jm-border-2)] bg-[var(--jm-surface)] p-4 flex items-center gap-4 hover:border-[color:var(--jm-border-2)] transition-colors"
                       >
                         <div className="w-10 h-10 rounded-md bg-[color:var(--jm-sidebar)] flex items-center justify-center shrink-0">
                           <FileText className="w-5 h-5 text-[color:var(--jm-text-2)]" />

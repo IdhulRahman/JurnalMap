@@ -121,7 +121,7 @@ def _topic_match(a: List[str], b: List[str]) -> float:
 
 # ── Public entry point ───────────────────────────────────────────────────────
 
-EDGE_THRESHOLD = 0.7
+EDGE_THRESHOLD = 0.5
 ISOLATED_THRESHOLD = 0.4
 
 
@@ -175,6 +175,7 @@ def compute_network(documents: List[Dict[str, Any]]) -> Dict[str, Any]:
             if composite > max_score[j]:
                 max_score[j] = composite
             if composite >= EDGE_THRESHOLD:
+                strength = "kuat" if composite >= 0.7 else "sedang"
                 # keyword overlap tokens (top 3 shared)
                 shared = list(set(top_kws[i][:8]) & set(top_kws[j][:8]))[:5]
                 edges.append({
@@ -185,6 +186,7 @@ def compute_network(documents: List[Dict[str, Any]]) -> Dict[str, Any]:
                     "keyword": round(keyword, 4),
                     "topic": round(topic, 4),
                     "shared_keywords": shared,
+                    "strength": strength,
                 })
 
     # Nodes
@@ -203,7 +205,7 @@ def compute_network(documents: List[Dict[str, Any]]) -> Dict[str, Any]:
     if len(documents) < 2:
         summary = "Perlu minimal 2 jurnal untuk membentuk graf."
     elif not edges:
-        summary = "Tidak ditemukan hubungan kuat antar jurnal (composite < 0.70)."
+        summary = "Tidak ditemukan hubungan antar jurnal (composite < 0.50)."
     else:
         summary = f"{len(edges)} hubungan terbentuk dari {len(documents)} jurnal."
         if isolated_count:

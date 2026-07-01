@@ -45,7 +45,7 @@ export default function UploadDropzone({ onUpload, busy = false, maxFiles = MAX_
       onMouseEnter={() => setHover(true)}
       onMouseLeave={() => setHover(false)}
       className={`block border-2 border-dashed rounded-xl p-8 text-center cursor-pointer transition-all
-        ${drag ? "border-[color:var(--jm-text)] bg-[color:var(--jm-sidebar)]" : hover ? "border-[color:var(--jm-border-2)] bg-[color:var(--jm-surface)]" : "border-[color:var(--jm-border)] bg-[color:var(--jm-surface)]"}
+        ${drag ? "border-[var(--jm-text)] bg-[var(--jm-sidebar)]" : hover ? "border-[var(--jm-border-2)] bg-[var(--jm-surface)]" : "border-[var(--jm-border-2)] bg-[var(--jm-surface)]"}
         ${busy ? "opacity-60 pointer-events-none" : ""}
       `}
     >

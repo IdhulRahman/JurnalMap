@@ -62,14 +62,17 @@ export default function NetworkGraph({ projectId, docs }) {
     const edges = data.edges.map((e) => ({ ...e }));
 
     const link = svg.append("g")
-      .attr("stroke", "#94a3b8")
       .selectAll("line")
       .data(edges)
       .join("line")
-      .attr("stroke-width", (d) => 0.5 + d.weight * 4)
-      .attr("stroke-opacity", (d) => 0.35 + d.weight * 0.5)
+      .attr("stroke", (d) => (d.strength === "kuat" ? "#10b981" : "#f59e0b"))
+      .attr("stroke-width", (d) => (d.strength === "kuat" ? 3 : 1.8))
+      .attr("stroke-opacity", (d) => (d.strength === "kuat" ? 0.8 : 0.6))
+      .attr("stroke-dasharray", (d) => (d.strength === "sedang" ? "5,5" : "none"))
       .attr("data-testid", (d) => `net-edge-${d.source}-${d.target}`)
       .style("cursor", "pointer")
+      .on("mouseenter", (_, d) => setSelectedEdge(d))
+      .on("mouseleave", () => setSelectedEdge(null))
       .on("click", (_, d) => setSelectedEdge(d));
 
     const nodeG = svg.append("g")
@@ -82,9 +85,9 @@ export default function NetworkGraph({ projectId, docs }) {
 
     nodeG.append("circle")
       .attr("r", 14)
-      .attr("fill", (d) => (d.isolated ? "#dc2626" : "#1a1d20"))
-      .attr("fill-opacity", 0.88)
-      .attr("stroke", (d) => (d.isolated ? "#fca5a5" : "white"))
+      .attr("fill", (d) => (d.isolated ? "#dc2626" : "var(--jm-text)"))
+      .attr("fill-opacity", 0.95)
+      .attr("stroke", (d) => (d.isolated ? "#fca5a5" : "var(--jm-border-2)"))
       .attr("stroke-width", (d) => (d.isolated ? 3 : 2));
 
     nodeG.append("title").text((d) => `${d.title}\n${d.isolated ? "Potensial tidak relevan" : ""}`);
@@ -119,7 +122,7 @@ export default function NetworkGraph({ projectId, docs }) {
   return (
     <section
       data-testid="network-section"
-      className="rounded-xl bg-[color:var(--jm-surface)] border border-[color:var(--jm-border)] p-5"
+      className="rounded-xl bg-[var(--jm-surface)] border-2 border-[var(--jm-border-2)] p-5"
     >
       <div className="flex items-center justify-between mb-3">
         <div className="flex items-center gap-2 text-[11px] uppercase tracking-[0.22em] font-semibold text-[color:var(--jm-text-3)]">
@@ -165,7 +168,7 @@ export default function NetworkGraph({ projectId, docs }) {
           {selectedEdge && (
             <div
               data-testid="network-edge-tip"
-              className="absolute bottom-3 right-3 max-w-sm rounded-lg border border-[color:var(--jm-border)] bg-[color:var(--jm-surface)] p-3 shadow-lg text-xs font-ui"
+              className="absolute bottom-3 right-3 max-w-sm rounded-lg border-2 border-[var(--jm-border-2)] bg-[var(--jm-surface)] p-3 shadow-lg text-xs font-ui"
             >
               <div className="flex items-center justify-between mb-1.5">
                 <span className="text-[10px] uppercase tracking-[0.18em] font-semibold text-[color:var(--jm-text-3)]">
@@ -180,6 +183,12 @@ export default function NetworkGraph({ projectId, docs }) {
                 </button>
               </div>
               <div className="text-[11px] text-[color:var(--jm-text-2)] leading-relaxed">
+                <div>
+                  <span className="font-semibold">Kategori:</span>{" "}
+                  <span className={selectedEdge.strength === "kuat" ? "text-emerald-500 font-semibold" : "text-amber-500 font-semibold"}>
+                    {selectedEdge.strength === "kuat" ? "Kuat" : "Sedang"}
+                  </span>
+                </div>
                 <div>
                   <span className="font-semibold">Composite:</span>{" "}
                   {(selectedEdge.weight * 100).toFixed(0)}%
@@ -207,7 +216,7 @@ export default function NetworkGraph({ projectId, docs }) {
           )}
           <div
             data-testid="network-summary"
-            className="mt-3 pt-3 border-t border-[color:var(--jm-border)] text-sm font-reading text-[color:var(--jm-text-2)] flex items-start gap-2"
+            className="mt-3 pt-3 border-t-2 border-[var(--jm-border-2)] text-sm font-reading text-[color:var(--jm-text-2)] flex items-start gap-2"
           >
             {data.nodes.some((n) => n.isolated) && (
               <AlertTriangle className="w-4 h-4 text-[color:var(--jm-low-fg)] shrink-0 mt-0.5" />
