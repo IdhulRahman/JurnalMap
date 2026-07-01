@@ -101,7 +101,12 @@ export default function PdfViewer({ fileUrl, highlights = [], jumpTo = null }) {
         className="flex-1 overflow-auto p-3 bg-[color:var(--jm-reading)]"
       >
         <Document
-          file={fileUrl}
+          file={{
+            url: fileUrl,
+            httpHeaders: {
+              Authorization: `Bearer ${localStorage.getItem("jurnalmap.token")}`
+            }
+          }}
           onLoadSuccess={onDocLoad}
           loading={<div className="text-center p-12 text-[color:var(--jm-text-3)] font-ui">Memuat PDF…</div>}
           error={<div className="text-center p-12 text-[color:var(--jm-low-fg)] font-ui">Gagal memuat PDF.</div>}
