@@ -1,14 +1,25 @@
-import { Link, useLocation } from "react-router-dom";
-import { Layers, Library, Settings as SettingsIcon } from "lucide-react";
+import { Link, useLocation, useNavigate } from "react-router-dom";
+import { Layers, Library, Settings as SettingsIcon, LogOut, UserCircle2 } from "lucide-react";
+import { toast } from "sonner";
 import { useSettings } from "@/store/settings";
+import { useAuth } from "@/store/auth";
 import { useT } from "@/lib/useT";
 
 export default function Header({ rightSlot = null }) {
   const loc = useLocation();
+  const nav = useNavigate();
   const onProject = loc.pathname.startsWith("/project");
   const { settings } = useSettings();
+  const { user, logout } = useAuth();
   const { t } = useT();
   const _theme = settings?.theme || "light";
+
+  const onLogout = () => {
+    logout();
+    toast.success("Anda telah keluar");
+    nav("/login", { replace: true });
+  };
+
   return (
     <header
       data-testid="app-header"
@@ -40,6 +51,21 @@ export default function Header({ rightSlot = null }) {
             </div>
           )}
           {rightSlot}
+          {user && (
+            <div
+              data-testid="header-user-badge"
+              className="hidden sm:flex items-center gap-1.5 px-2.5 py-1.5 rounded-md border border-[color:var(--jm-border)] text-xs font-ui text-[color:var(--jm-text-2)]"
+              title={user.email || user.username}
+            >
+              <UserCircle2 className="w-3.5 h-3.5" />
+              <span className="font-semibold text-[color:var(--jm-text)]">{user.username}</span>
+              {user.is_admin && (
+                <span className="text-[9px] uppercase tracking-widest ml-1 px-1.5 py-0.5 rounded bg-[color:var(--jm-text)] text-[color:var(--jm-bg)]">
+                  admin
+                </span>
+              )}
+            </div>
+          )}
           <Link
             to="/settings"
             data-testid="header-settings-link"
@@ -48,6 +74,16 @@ export default function Header({ rightSlot = null }) {
           >
             <SettingsIcon className="w-4 h-4" />
           </Link>
+          {user && (
+            <button
+              onClick={onLogout}
+              data-testid="header-logout-btn"
+              title="Keluar"
+              className="w-9 h-9 rounded-md flex items-center justify-center border border-[color:var(--jm-border)] text-[color:var(--jm-text-2)] hover:bg-[color:var(--jm-sidebar)] hover:text-[color:var(--jm-text)] transition-colors"
+            >
+              <LogOut className="w-4 h-4" />
+            </button>
+          )}
         </div>
       </div>
     </header>

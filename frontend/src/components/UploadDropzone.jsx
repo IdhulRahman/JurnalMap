@@ -2,19 +2,35 @@ import { useCallback, useState } from "react";
 import { UploadCloud, FileText, Loader2 } from "lucide-react";
 import { useT } from "@/lib/useT";
 
-export default function UploadDropzone({ onUpload, busy = false }) {
+const MAX_FILES = 5;
+
+/**
+ * Upload dropzone that accepts up to 5 PDF files.
+ * Calls `onUpload(files: File[])` with the accepted files.
+ */
+export default function UploadDropzone({ onUpload, busy = false, maxFiles = MAX_FILES }) {
   const { t } = useT();
   const [drag, setDrag] = useState(false);
   const [hover, setHover] = useState(false);
+
+  const accept = useCallback(
+    (fileList) => {
+      const arr = Array.from(fileList || []);
+      const pdfs = arr.filter((f) => f && (f.type === "application/pdf" || f.name?.toLowerCase().endsWith(".pdf")));
+      if (pdfs.length === 0) return;
+      const selected = pdfs.slice(0, maxFiles);
+      onUpload(selected);
+    },
+    [onUpload, maxFiles],
+  );
 
   const onDrop = useCallback(
     (e) => {
       e.preventDefault();
       setDrag(false);
-      const file = e.dataTransfer?.files?.[0];
-      if (file && file.type === "application/pdf") onUpload(file);
+      accept(e.dataTransfer?.files);
     },
-    [onUpload],
+    [accept],
   );
 
   return (
@@ -37,11 +53,13 @@ export default function UploadDropzone({ onUpload, busy = false }) {
         data-testid="upload-input"
         type="file"
         accept="application/pdf"
+        multiple
         className="hidden"
         disabled={busy}
         onChange={(e) => {
-          const file = e.target.files?.[0];
-          if (file) onUpload(file);
+          accept(e.target.files);
+          // reset so the same file selected again triggers change
+          e.target.value = "";
         }}
       />
       <div className="flex flex-col items-center gap-3">
@@ -57,7 +75,7 @@ export default function UploadDropzone({ onUpload, busy = false }) {
             {busy ? t("upload.busy") : t("upload.drop")}
           </div>
           <div className="text-xs text-[color:var(--jm-text-3)] mt-1 font-ui">
-            {t("upload.hint")}
+            Maks {maxFiles} file per unggahan • Diproses di latar belakang
           </div>
         </div>
         <div className="flex items-center gap-2 text-[11px] uppercase tracking-[0.2em] text-[color:var(--jm-text-3)] font-semibold">

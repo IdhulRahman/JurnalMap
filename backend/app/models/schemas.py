@@ -29,6 +29,7 @@ class Project(BaseModel):
     description: str = ""
     created_at: str = Field(default_factory=utcnow_iso)
     document_count: int = 0
+    owner_id: Optional[str] = None
 
 
 # ----- Document -----

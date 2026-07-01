@@ -57,14 +57,22 @@ export default function ProjectPage() {
     return () => clearInterval(t);
   }, [docs.map((d) => `${d.id}:${d.status}`).join(",")]);
 
-  const onUpload = async (file) => {
+  const onUpload = async (files) => {
+    // Backwards compat: allow single File
+    const arr = Array.isArray(files) ? files : [files];
+    if (!arr.length) return;
     setBusyUpload(true);
     try {
-      await api.uploadDocument(id, file);
-      toast.success("Unggahan dimulai — pemrosesan berjalan di latar belakang");
+      await api.uploadDocuments(id, arr);
+      toast.success(
+        arr.length === 1
+          ? "Unggahan dimulai — pemrosesan berjalan di latar belakang"
+          : `${arr.length} file diunggah — pemrosesan berjalan di latar belakang`,
+      );
       await loadDocs();
     } catch (e) {
-      toast.error("Unggah gagal");
+      const detail = e?.response?.data?.detail;
+      toast.error(typeof detail === "string" ? detail : "Unggah gagal");
     } finally {
       setBusyUpload(false);
     }

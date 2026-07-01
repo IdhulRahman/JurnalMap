@@ -17,6 +17,7 @@ import { useSettings } from "@/store/settings";
 import { useT } from "@/lib/useT";
 import { api } from "@/services/api";
 import Header from "@/components/Header";
+import ChangePasswordCard from "@/components/ChangePasswordCard";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
@@ -286,6 +287,11 @@ export default function SettingsPage() {
             {saving ? <Loader2 className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />}
             {t("settings.save")}
           </Button>
+        </div>
+
+        {/* Security: Change Password */}
+        <div className="mt-10">
+          <ChangePasswordCard />
         </div>
       </main>
     </div>

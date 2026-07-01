@@ -3,31 +3,83 @@ import axios from "axios";
 const BACKEND_URL = process.env.REACT_APP_BACKEND_URL;
 export const API = `${BACKEND_URL}/api`;
 
+export const TOKEN_KEY = "jurnalmap.token";
+
 const http = axios.create({ baseURL: API });
 
+// Request interceptor: attach bearer token if present.
+http.interceptors.request.use((config) => {
+  const token = localStorage.getItem(TOKEN_KEY);
+  if (token) {
+    config.headers = config.headers || {};
+    config.headers["Authorization"] = `Bearer ${token}`;
+  }
+  return config;
+});
+
+// Response interceptor: on 401 (expired/invalid token), clear token and
+// redirect to /login unless we are already on an auth screen.
+http.interceptors.response.use(
+  (resp) => resp,
+  (err) => {
+    if (err?.response?.status === 401) {
+      const p = window.location.pathname;
+      const onAuthPage = p === "/login" || p === "/register" || p === "/forgot-password";
+      // Do not force-redirect when the 401 came from a login attempt itself
+      const isAuthEndpoint = /\/auth\/(login|register|forgot-password)$/.test(err.config?.url || "");
+      if (!onAuthPage && !isAuthEndpoint) {
+        localStorage.removeItem(TOKEN_KEY);
+        window.location.assign("/login");
+      }
+    }
+    return Promise.reject(err);
+  },
+);
+
 export const api = {
-  // projects
+  // ── Auth ──────────────────────────────────────────────────
+  login: (username, password) =>
+    http.post("/auth/login", { username, password }).then((r) => r.data),
+  register: (payload) =>
+    http.post("/auth/register", payload).then((r) => r.data),
+  forgotPassword: (payload) =>
+    http.post("/auth/forgot-password", payload).then((r) => r.data),
+  changePassword: (current_password, new_password) =>
+    http.post("/auth/change-password", { current_password, new_password }).then((r) => r.data),
+  me: () => http.get("/auth/me").then((r) => r.data),
+
+  // ── Projects ─────────────────────────────────────────────────
   listProjects: () => http.get("/projects").then((r) => r.data),
   getProject: (id) => http.get(`/projects/${id}`).then((r) => r.data),
   createProject: (payload) => http.post("/projects", payload).then((r) => r.data),
   deleteProject: (id) => http.delete(`/projects/${id}`).then((r) => r.data),
 
-  // settings
+  // ── Settings ─────────────────────────────────────────────────
   getSettings: () => http.get("/settings").then((r) => r.data),
   updateSettings: (patch) => http.put("/settings", patch).then((r) => r.data),
 
-  // documents
+  // ── Documents ────────────────────────────────────────────────
   listDocuments: (projectId) =>
     http.get(`/projects/${projectId}/documents`).then((r) => r.data),
-  uploadDocument: (projectId, file) => {
+  /**
+   * Upload one or more PDF files to a project. Accepts a single File or an
+   * array of Files (max 5). The backend endpoint is
+   * `POST /projects/{id}/documents` and expects the multipart field name
+   * `files` (plural) for every file part.
+   */
+  uploadDocuments: (projectId, filesInput) => {
+    const files = Array.isArray(filesInput) ? filesInput : [filesInput];
     const fd = new FormData();
-    fd.append("file", file);
+    for (const f of files) fd.append("files", f);
     return http
       .post(`/projects/${projectId}/documents`, fd, {
         headers: { "Content-Type": "multipart/form-data" },
       })
       .then((r) => r.data);
   },
+  // Backwards-compat alias so any leftover callers keep working.
+  uploadDocument: (projectId, file) =>
+    api.uploadDocuments(projectId, [file]),
   getDocument: (id) => http.get(`/documents/${id}`).then((r) => r.data),
   updateDocumentTitle: (id, title) =>
     http.patch(`/documents/${id}`, { title }).then((r) => r.data),
@@ -40,29 +92,29 @@ export const api = {
       .then((r) => r.data),
   pdfUrl: (id) => `${API}/documents/${id}/pdf`,
 
-  // evidence
+  // ── Evidence ─────────────────────────────────────────────────
   evidenceForClaim: (claimId) =>
     http.post(`/claims/${claimId}/evidence`).then((r) => r.data),
   evidenceForSection: (docId, text) =>
     http.post(`/documents/${docId}/section-evidence`, { text }).then((r) => r.data),
 
-  // outliers
+  // ── Outliers ─────────────────────────────────────────────────
   outliers: (projectId) =>
     http.get(`/projects/${projectId}/outliers`).then((r) => r.data),
 
-  // matrix
+  // ── Matrix ──────────────────────────────────────────────────
   matrix: (projectId, documentIds = null, refresh = false, method = "default") =>
     http
       .post(`/projects/${projectId}/matrix`, { document_ids: documentIds, refresh, method })
       .then((r) => r.data),
 
-  // ask
+  // ── Ask ─────────────────────────────────────────────────────
   ask: (projectId, question) =>
     http
       .post(`/projects/${projectId}/ask`, { question })
       .then((r) => r.data),
 
-  // check & fix
+  // ── Check & Fix ────────────────────────────────────────────────
   runCheck: (projectId, payload) =>
     http.post(`/projects/${projectId}/check`, payload).then((r) => r.data),
   getLastCheck: (projectId) =>

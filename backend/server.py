@@ -52,7 +52,14 @@ from app.models.schemas import (
     new_uid,
     utcnow_iso,
 )
-from app.models.user import User, UserCreate, UserLogin, TokenResponse
+from app.models.user import (
+    User,
+    UserCreate,
+    UserLogin,
+    TokenResponse,
+    ForgotPasswordRequest,
+    ChangePasswordRequest,
+)
 from app.services.document_processor import process_document, regenerate_summary
 from app.services.evidence_service import find_evidence
 from app.services.outlier_service import compute_outliers
@@ -127,6 +134,17 @@ async def _document_or_404(document_id: str) -> dict:
     return d
 
 
+async def _document_or_forbidden(document_id: str, current_user: dict) -> dict:
+    """Fetch a document and verify caller owns its parent project."""
+    d = await _document_or_404(document_id)
+    project = await db.projects.find_one({"id": d["project_id"]}, {"_id": 0, "owner_id": 1})
+    if project and not current_user.get("is_admin"):
+        owner = project.get("owner_id")
+        if owner and owner != current_user["id"]:
+            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Not your document")
+    return d
+
+
 # ── Health ────────────────────────────────────────────────────────────────────
 
 @api.get("/")
@@ -136,28 +154,58 @@ async def root():
 
 # ── Auth ──────────────────────────────────────────────────────────────────────
 
+# Lockout policy: 3 consecutive failed attempts → 30-second cooldown.
+MAX_LOGIN_ATTEMPTS = int(os.environ.get("MAX_LOGIN_ATTEMPTS", "3"))
+LOCKOUT_SECONDS = int(os.environ.get("LOCKOUT_SECONDS", "30"))
+
+
+def _now_ts() -> float:
+    from datetime import datetime, timezone
+    return datetime.now(timezone.utc).timestamp()
+
+
+def _lockout_active(user_doc: dict) -> tuple[bool, int]:
+    """Return (is_locked, remaining_seconds)."""
+    locked_until = user_doc.get("locked_until") or 0
+    if not locked_until:
+        return False, 0
+    now = _now_ts()
+    if now < locked_until:
+        return True, int(locked_until - now) + 1
+    return False, 0
+
+
 @api.post("/auth/register", response_model=TokenResponse)
 async def register(payload: UserCreate):
-    """Register a new user account."""
+    """Register a new user account.
+
+    Password policy is enforced by `UserCreate` validator: length>=8, upper, digit, symbol.
+    """
     username = payload.username.strip().lower()
     if not username or len(username) < 3:
         raise HTTPException(400, "Username must be at least 3 characters")
-    if len(payload.password) < 4:
-        raise HTTPException(400, "Password must be at least 4 characters")
 
     existing = await db.users.find_one({"username": username})
     if existing:
         raise HTTPException(409, "Username already taken")
+
+    # Prevent duplicate emails (case-insensitive)
+    email_norm = payload.email.strip().lower()
+    existing_email = await db.users.find_one({"email": email_norm})
+    if existing_email:
+        raise HTTPException(409, "Email already registered")
 
     user_id = new_uid()
     hashed = hash_password(payload.password)
     user_doc = {
         "id": user_id,
         "username": username,
-        "email": (payload.email or "").strip() or None,
+        "email": email_norm,
         "is_admin": False,
         "password_hash": hashed,
         "created_at": utcnow_iso(),
+        "failed_attempts": 0,
+        "locked_until": 0,
     }
     await db.users.insert_one(user_doc)
 
@@ -168,15 +216,99 @@ async def register(payload: UserCreate):
 
 @api.post("/auth/login", response_model=TokenResponse)
 async def login(payload: UserLogin):
-    """Login with username and password, returns JWT token."""
+    """Login with username and password, returns JWT token.
+
+    After 3 consecutive failures the account is locked for 30 seconds.
+    """
     username = payload.username.strip().lower()
     user_doc = await db.users.find_one({"username": username})
-    if not user_doc or not verify_password(payload.password, user_doc.get("password_hash", "")):
+    if not user_doc:
+        # Do not leak whether the username exists.
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid username or password")
+
+    # Enforce lockout
+    is_locked, remaining = _lockout_active(user_doc)
+    if is_locked:
+        raise HTTPException(
+            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+            detail={
+                "message": "Account temporarily locked. Please wait or use forgot-password.",
+                "locked": True,
+                "remaining_seconds": remaining,
+                "max_attempts": MAX_LOGIN_ATTEMPTS,
+            },
+        )
+
+    if not verify_password(payload.password, user_doc.get("password_hash", "")):
+        attempts = int(user_doc.get("failed_attempts", 0)) + 1
+        update: dict = {"failed_attempts": attempts}
+        if attempts >= MAX_LOGIN_ATTEMPTS:
+            update["locked_until"] = _now_ts() + LOCKOUT_SECONDS
+            update["failed_attempts"] = 0  # reset after lockout kicks in
+        await db.users.update_one({"id": user_doc["id"]}, {"$set": update})
+
+        remaining_attempts = max(MAX_LOGIN_ATTEMPTS - attempts, 0)
+        detail = {
+            "message": "Invalid username or password",
+            "remaining_attempts": remaining_attempts,
+            "max_attempts": MAX_LOGIN_ATTEMPTS,
+        }
+        if attempts >= MAX_LOGIN_ATTEMPTS:
+            detail["locked"] = True
+            detail["remaining_seconds"] = LOCKOUT_SECONDS
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail=detail)
+
+    # Success: reset counters
+    await db.users.update_one({"id": user_doc["id"]}, {"$set": {"failed_attempts": 0, "locked_until": 0}})
 
     token = create_access_token(user_doc["id"], username)
     user = User(**{k: v for k, v in user_doc.items() if k != "password_hash"})
     return TokenResponse(access_token=token, user=user)
+
+
+@api.post("/auth/forgot-password", response_model=TokenResponse)
+async def forgot_password(payload: ForgotPasswordRequest):
+    """Reset password when the user proves ownership via matching username + email.
+
+    NOTE: In production this should send an email with a signed token. For MVP
+    we accept an in-band reset when username and email both match a record.
+    """
+    username = payload.username.strip().lower()
+    email = payload.email.strip().lower()
+    user_doc = await db.users.find_one({"username": username})
+    if not user_doc:
+        raise HTTPException(404, "Account not found")
+    if (user_doc.get("email") or "").lower() != email:
+        raise HTTPException(400, "Username and email do not match our records")
+
+    hashed = hash_password(payload.new_password)
+    await db.users.update_one(
+        {"id": user_doc["id"]},
+        {"$set": {
+            "password_hash": hashed,
+            "failed_attempts": 0,
+            "locked_until": 0,
+        }},
+    )
+    token = create_access_token(user_doc["id"], username)
+    user = User(**{k: v for k, v in user_doc.items() if k not in ("password_hash",)})
+    return TokenResponse(access_token=token, user=user)
+
+
+@api.post("/auth/change-password")
+async def change_password(payload: ChangePasswordRequest, current_user: dict = Depends(get_current_user)):
+    """Authenticated password change. Requires current password."""
+    full = await db.users.find_one({"id": current_user["id"]})
+    if not full or not verify_password(payload.current_password, full.get("password_hash", "")):
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Current password is incorrect")
+    if payload.current_password == payload.new_password:
+        raise HTTPException(400, "New password must differ from current password")
+    hashed = hash_password(payload.new_password)
+    await db.users.update_one(
+        {"id": current_user["id"]},
+        {"$set": {"password_hash": hashed, "failed_attempts": 0, "locked_until": 0}},
+    )
+    return {"changed": True}
 
 
 @api.get("/auth/me", response_model=User)
@@ -188,30 +320,56 @@ async def me(current_user: dict = Depends(get_current_user)):
 # ── Projects ──────────────────────────────────────────────────────────────────
 
 @api.post("/projects", response_model=Project)
-async def create_project(payload: ProjectCreate, _: dict = Depends(get_current_user)):
+async def create_project(payload: ProjectCreate, current_user: dict = Depends(get_current_user)):
     p = Project(name=payload.name.strip() or "Untitled project", description=payload.description.strip())
-    await db.projects.insert_one(p.model_dump())
+    doc = p.model_dump()
+    doc["owner_id"] = current_user["id"]
+    await db.projects.insert_one(doc)
     return p
 
 
+def _owner_filter(current_user: dict) -> dict:
+    """Return a Mongo filter that scopes reads to owned + legacy (no owner_id) projects.
+
+    Admin users see everything.
+    """
+    if current_user.get("is_admin"):
+        return {}
+    # Include legacy documents without owner_id so admin's own historical projects
+    # remain accessible (they will be silently claimed by whoever accesses them).
+    return {"$or": [{"owner_id": current_user["id"]}, {"owner_id": {"$exists": False}}]}
+
+
 @api.get("/projects", response_model=List[Project])
-async def list_projects(_: dict = Depends(get_current_user)):
-    rows = await db.projects.find({}, {"_id": 0}).sort("created_at", -1).to_list(500)
+async def list_projects(current_user: dict = Depends(get_current_user)):
+    rows = await db.projects.find(_owner_filter(current_user), {"_id": 0}).sort("created_at", -1).to_list(500)
     for r in rows:
         r["document_count"] = await db.documents.count_documents({"project_id": r["id"]})
     return [Project(**r) for r in rows]
 
 
+async def _project_or_forbidden(project_id: str, current_user: dict) -> dict:
+    """Fetch a project and ensure the caller owns it (or is admin)."""
+    p = await db.projects.find_one({"id": project_id}, {"_id": 0})
+    if not p:
+        raise HTTPException(404, "Project not found")
+    if not current_user.get("is_admin"):
+        owner = p.get("owner_id")
+        if owner and owner != current_user["id"]:
+            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Not your project")
+    return p
+
+
 @api.get("/projects/{project_id}", response_model=Project)
-async def get_project(project_id: str, _: dict = Depends(get_current_user)):
-    p = await _project_or_404(project_id)
+async def get_project(project_id: str, current_user: dict = Depends(get_current_user)):
+    p = await _project_or_forbidden(project_id, current_user)
     p["document_count"] = await db.documents.count_documents({"project_id": project_id})
     return Project(**p)
 
 
 @api.delete("/projects/{project_id}")
-async def delete_project(project_id: str, _: dict = Depends(get_current_user)):
-    await _project_or_404(project_id)
+async def delete_project(project_id: str, current_user: dict = Depends(get_current_user)):
+    await _project_or_forbidden(project_id, current_user)
     docs = await db.documents.find({"project_id": project_id}, {"_id": 0, "id": 1}).to_list(1000)
     doc_ids = [d["id"] for d in docs]
     if doc_ids:
@@ -238,8 +396,8 @@ async def delete_project(project_id: str, _: dict = Depends(get_current_user)):
 # ── Documents ─────────────────────────────────────────────────────────────────
 
 @api.get("/projects/{project_id}/documents", response_model=List[DocumentMeta])
-async def list_documents(project_id: str, _: dict = Depends(get_current_user)):
-    await _project_or_404(project_id)
+async def list_documents(project_id: str, current_user: dict = Depends(get_current_user)):
+    await _project_or_forbidden(project_id, current_user)
     rows = await db.documents.find({"project_id": project_id}, {"_id": 0}).sort("uploaded_at", -1).to_list(500)
     return [DocumentMeta(**r) for r in rows]
 
@@ -249,10 +407,10 @@ async def upload_documents(
     project_id: str,
     background_tasks: BackgroundTasks,
     files: List[UploadFile] = File(...),
-    _: dict = Depends(get_current_user),
+    current_user: dict = Depends(get_current_user),
 ):
     """Upload up to 5 PDF files to a project. All are processed asynchronously."""
-    await _project_or_404(project_id)
+    await _project_or_forbidden(project_id, current_user)
 
     if len(files) > MAX_FILES_PER_UPLOAD:
         raise HTTPException(400, f"Maximum {MAX_FILES_PER_UPLOAD} files per upload")
@@ -303,15 +461,15 @@ async def upload_documents(
 
 
 @api.get("/documents/{document_id}", response_model=DocumentMeta)
-async def get_document(document_id: str, _: dict = Depends(get_current_user)):
-    d = await _document_or_404(document_id)
+async def get_document(document_id: str, current_user: dict = Depends(get_current_user)):
+    d = await _document_or_forbidden(document_id, current_user)
     return DocumentMeta(**d)
 
 
 @api.patch("/documents/{document_id}", response_model=DocumentMeta)
-async def update_document(document_id: str, payload: DocumentTitleUpdate, _: dict = Depends(get_current_user)):
+async def update_document(document_id: str, payload: DocumentTitleUpdate, current_user: dict = Depends(get_current_user)):
     """Update editable document fields. Currently: title only."""
-    d = await _document_or_404(document_id)
+    d = await _document_or_forbidden(document_id, current_user)
     new_title = (payload.title or "").strip()
     if not new_title:
         raise HTTPException(400, "title must not be empty")
@@ -324,8 +482,8 @@ async def update_document(document_id: str, payload: DocumentTitleUpdate, _: dic
 
 
 @api.delete("/documents/{document_id}")
-async def delete_document(document_id: str, _: dict = Depends(get_current_user)):
-    d = await _document_or_404(document_id)
+async def delete_document(document_id: str, current_user: dict = Depends(get_current_user)):
+    d = await _document_or_forbidden(document_id, current_user)
     await db.sentences.delete_many({"document_id": document_id})
     await db.claims.delete_many({"document_id": document_id})
     await db.matrix_cache.delete_many({"document_id": document_id})
@@ -341,8 +499,8 @@ async def delete_document(document_id: str, _: dict = Depends(get_current_user))
 
 
 @api.get("/documents/{document_id}/pdf")
-async def serve_pdf(document_id: str, _: dict = Depends(get_current_user)):
-    await _document_or_404(document_id)
+async def serve_pdf(document_id: str, current_user: dict = Depends(get_current_user)):
+    await _document_or_forbidden(document_id, current_user)
     fp = UPLOAD_DIR / f"{document_id}.pdf"
     if not fp.exists():
         raise HTTPException(404, "PDF file missing")
@@ -450,8 +608,8 @@ async def update_settings(payload: dict = Body(...), _: dict = Depends(get_curre
 # ── Summary ───────────────────────────────────────────────────────────────────
 
 @api.get("/documents/{document_id}/summary")
-async def get_summary(document_id: str, _: dict = Depends(get_current_user)):
-    d = await _document_or_404(document_id)
+async def get_summary(document_id: str, current_user: dict = Depends(get_current_user)):
+    d = await _document_or_forbidden(document_id, current_user)
     claims = await db.claims.find({"document_id": document_id}, {"_id": 0}).sort("idx", 1).to_list(50)
     return {
         "document_id": document_id,
@@ -469,9 +627,9 @@ async def get_summary(document_id: str, _: dict = Depends(get_current_user)):
 
 
 @api.get("/documents/{document_id}/status")
-async def get_status(document_id: str, _: dict = Depends(get_current_user)):
+async def get_status(document_id: str, current_user: dict = Depends(get_current_user)):
     """Status endpoint that returns processing state + structured summary when ready."""
-    d = await _document_or_404(document_id)
+    d = await _document_or_forbidden(document_id, current_user)
     claims = await db.claims.find({"document_id": document_id}, {"_id": 0}).sort("idx", 1).to_list(50)
     return {
         "id": document_id,
@@ -490,9 +648,9 @@ async def get_status(document_id: str, _: dict = Depends(get_current_user)):
 
 
 @api.post("/documents/{document_id}/summarize")
-async def resummarize(document_id: str, model: Optional[str] = None, payload: dict = Body(default={}), _: dict = Depends(get_current_user)):
+async def resummarize(document_id: str, model: Optional[str] = None, payload: dict = Body(default={}), current_user: dict = Depends(get_current_user)):
     """Regenerate summary with chosen model."""
-    await _document_or_404(document_id)
+    await _document_or_forbidden(document_id, current_user)
     settings = await _load_settings()
     if isinstance(payload, dict) and payload.get("persona_id"):
         settings = {**settings, "persona_id": payload["persona_id"]}
@@ -513,16 +671,18 @@ async def resummarize(document_id: str, model: Optional[str] = None, payload: di
             status_code=502,
             detail=f"Model '{model_id}' returned malformed JSON. Please try another model. ({e})",
         )
-    return await get_summary(document_id, _)
+    return await get_summary(document_id, current_user)
 
 
 # ── Evidence ──────────────────────────────────────────────────────────────────
 
 @api.post("/claims/{claim_id}/evidence", response_model=EvidenceResponse)
-async def evidence_for_claim(claim_id: str, _: dict = Depends(get_current_user)):
+async def evidence_for_claim(claim_id: str, current_user: dict = Depends(get_current_user)):
     claim = await db.claims.find_one({"id": claim_id}, {"_id": 0})
     if not claim:
         raise HTTPException(404, "Claim not found")
+    # Enforce ownership through the claim's document
+    await _document_or_forbidden(claim["document_id"], current_user)
     sentences = await db.sentences.find({"document_id": claim["document_id"]}, {"_id": 0}).sort("idx", 1).to_list(5000)
     settings = await _load_settings()
     provider, model_id = split_provider_model(settings.get("default_model") or default_model(), settings)
@@ -538,9 +698,9 @@ async def evidence_for_claim(claim_id: str, _: dict = Depends(get_current_user))
 
 
 @api.post("/documents/{document_id}/section-evidence")
-async def evidence_for_section(document_id: str, payload: dict = Body(...), _: dict = Depends(get_current_user)):
+async def evidence_for_section(document_id: str, payload: dict = Body(...), current_user: dict = Depends(get_current_user)):
     """Find evidence in a doc for arbitrary text."""
-    await _document_or_404(document_id)
+    await _document_or_forbidden(document_id, current_user)
     text = (payload.get("text") or "").strip()
     if not text:
         raise HTTPException(400, "text is required")
@@ -557,8 +717,8 @@ async def evidence_for_section(document_id: str, payload: dict = Body(...), _: d
 # ── Outliers ──────────────────────────────────────────────────────────────────
 
 @api.get("/projects/{project_id}/outliers", response_model=OutlierResponse)
-async def project_outliers(project_id: str, _: dict = Depends(get_current_user)):
-    await _project_or_404(project_id)
+async def project_outliers(project_id: str, current_user: dict = Depends(get_current_user)):
+    await _project_or_forbidden(project_id, current_user)
 
     # Check cache first
     cached = app_cache.get_outlier(project_id)
@@ -585,9 +745,9 @@ async def build_matrix(
     document_ids: Optional[List[str]] = Body(default=None, embed=True),
     refresh: bool = Body(default=False, embed=True),
     method: str = Body(default="default", embed=True),
-    _: dict = Depends(get_current_user),
+    current_user: dict = Depends(get_current_user),
 ):
-    await _project_or_404(project_id)
+    await _project_or_forbidden(project_id, current_user)
     if method not in MATRIX_METHODS:
         method = "default"
     query = {"project_id": project_id, "status": "ready"}
@@ -637,8 +797,8 @@ async def build_matrix(
 # ── Ask Library ───────────────────────────────────────────────────────────────
 
 @api.post("/projects/{project_id}/ask", response_model=AskResponse)
-async def ask_library(project_id: str, payload: AskRequest, model: Optional[str] = None, _: dict = Depends(get_current_user)):
-    await _project_or_404(project_id)
+async def ask_library(project_id: str, payload: AskRequest, model: Optional[str] = None, current_user: dict = Depends(get_current_user)):
+    await _project_or_forbidden(project_id, current_user)
     if not payload.question.strip():
         raise HTTPException(400, "question must not be empty")
     docs = await db.documents.find({"project_id": project_id, "status": "ready"}, {"_id": 0}).to_list(500)
@@ -666,8 +826,8 @@ async def ask_library(project_id: str, payload: AskRequest, model: Optional[str]
 # ── Check & Fix ───────────────────────────────────────────────────────────────
 
 @api.get("/documents/{document_id}/sentence/{sentence_id}")
-async def get_sentence_detail(document_id: str, sentence_id: str, _: dict = Depends(get_current_user)):
-    d = await _document_or_404(document_id)
+async def get_sentence_detail(document_id: str, sentence_id: str, current_user: dict = Depends(get_current_user)):
+    d = await _document_or_forbidden(document_id, current_user)
     s = await db.sentences.find_one({"id": sentence_id, "document_id": document_id}, {"_id": 0})
     if not s:
         raise HTTPException(404, "sentence not found")
@@ -690,8 +850,8 @@ async def get_sentence_detail(document_id: str, sentence_id: str, _: dict = Depe
 
 
 @api.post("/projects/{project_id}/check")
-async def check_fix(project_id: str, payload: dict = Body(...), _: dict = Depends(get_current_user)):
-    await _project_or_404(project_id)
+async def check_fix(project_id: str, payload: dict = Body(...), current_user: dict = Depends(get_current_user)):
+    await _project_or_forbidden(project_id, current_user)
     text = (payload.get("text") or "").strip()
     if not text:
         raise HTTPException(400, "text is required")
@@ -748,8 +908,8 @@ async def check_fix(project_id: str, payload: dict = Body(...), _: dict = Depend
 
 
 @api.get("/projects/{project_id}/check")
-async def get_last_check(project_id: str, _: dict = Depends(get_current_user)):
-    await _project_or_404(project_id)
+async def get_last_check(project_id: str, current_user: dict = Depends(get_current_user)):
+    await _project_or_forbidden(project_id, current_user)
     doc = await db.check_runs.find_one({"project_id": project_id}, {"_id": 0})
     if not doc:
         return {"exists": False}
@@ -849,10 +1009,12 @@ async def seed_admin():
         await db.users.insert_one({
             "id": user_id,
             "username": admin_username,
-            "email": None,
+            "email": os.environ.get("ADMIN_EMAIL", "admin@jurnalmap.local"),
             "is_admin": True,
             "password_hash": hashed,
             "created_at": utcnow_iso(),
+            "failed_attempts": 0,
+            "locked_until": 0,
         })
         logger.info("Default admin account '%s' created.", admin_username)
     else:
@@ -860,7 +1022,9 @@ async def seed_admin():
 
     # Ensure MongoDB indexes for performance
     await db.users.create_index("username", unique=True)
+    await db.users.create_index("email")
     await db.projects.create_index("created_at")
+    await db.projects.create_index("owner_id")
     await db.documents.create_index([("project_id", 1), ("uploaded_at", -1)])
     await db.documents.create_index([("project_id", 1), ("status", 1)])
     await db.sentences.create_index([("document_id", 1), ("idx", 1)])
