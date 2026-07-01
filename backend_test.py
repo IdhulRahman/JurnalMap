@@ -9,7 +9,7 @@ import sys
 from typing import Dict, List, Optional
 
 # Backend URL from frontend/.env
-BASE_URL = "https://8ae4e47a-c558-4ee8-a207-6fce7d1b5e4d.preview.emergentagent.com/api"
+BASE_URL = "https://pdf-queue-processor.preview.emergentagent.com/api"
 
 # Test credentials
 ADMIN_USERNAME = "admin"
