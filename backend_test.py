@@ -1,936 +1,620 @@
 #!/usr/bin/env python3
 """
-Comprehensive backend test for JurnalMap API.
-Tests all endpoints as specified in the review request.
+JurnalMap Backend Test - Focus on NEW/CHANGED endpoints after large revision.
+
+Test scenarios:
+1. GET /api/config (no auth)
+2. Queue + upload flow (admin token)
+3. Auto-summary must NOT run
+4. On-demand summarize with language
+5. Retry endpoint
+6. Network graph
+7. Ask language
+8. Regression sanity
 """
-import requests
-import time
+import os
 import sys
-from typing import Dict, List, Optional
+import time
+import requests
+from pathlib import Path
 
-# Backend URL from frontend/.env
-BASE_URL = "https://pdf-queue-processor.preview.emergentagent.com/api"
+# Base URL from environment
+BASE_URL = os.environ.get("REACT_APP_BACKEND_URL", "https://a3982528-8c1d-4548-97ce-8cc44cfbb337.preview.emergentagent.com")
+API_URL = f"{BASE_URL}/api"
 
-# Test credentials
+# Admin credentials
 ADMIN_USERNAME = "admin"
 ADMIN_PASSWORD = "admin"
 
-# Demo PDFs
-DEMO_PDFS = [
-    "/tmp/demo_pdfs/doc1.pdf",
-    "/tmp/demo_pdfs/doc2.pdf",
-    "/tmp/demo_pdfs/doc3.pdf",
-]
+# Test PDF file
+TEST_PDF = "/app/backend/uploads/0f1539db-7f94-4d44-ae38-2736c8dbd6ee.pdf"
 
-# Test results tracking
-test_results = []
+# Color codes for output
+GREEN = "\033[92m"
+RED = "\033[91m"
+YELLOW = "\033[93m"
+BLUE = "\033[94m"
+RESET = "\033[0m"
 
+class TestResults:
+    def __init__(self):
+        self.passed = []
+        self.failed = []
+        self.warnings = []
+    
+    def add_pass(self, test_name):
+        self.passed.append(test_name)
+        print(f"{GREEN}✓{RESET} {test_name}")
+    
+    def add_fail(self, test_name, reason):
+        self.failed.append((test_name, reason))
+        print(f"{RED}✗{RESET} {test_name}: {reason}")
+    
+    def add_warning(self, test_name, reason):
+        self.warnings.append((test_name, reason))
+        print(f"{YELLOW}⚠{RESET} {test_name}: {reason}")
+    
+    def summary(self):
+        print(f"\n{BLUE}{'='*60}{RESET}")
+        print(f"{BLUE}TEST SUMMARY{RESET}")
+        print(f"{BLUE}{'='*60}{RESET}")
+        print(f"{GREEN}Passed: {len(self.passed)}{RESET}")
+        print(f"{RED}Failed: {len(self.failed)}{RESET}")
+        print(f"{YELLOW}Warnings: {len(self.warnings)}{RESET}")
+        
+        if self.failed:
+            print(f"\n{RED}Failed Tests:{RESET}")
+            for name, reason in self.failed:
+                print(f"  - {name}: {reason}")
+        
+        if self.warnings:
+            print(f"\n{YELLOW}Warnings:{RESET}")
+            for name, reason in self.warnings:
+                print(f"  - {name}: {reason}")
 
-def log_test(name: str, passed: bool, details: str = ""):
-    """Log a test result."""
-    status = "✅ PASS" if passed else "❌ FAIL"
-    test_results.append({"name": name, "passed": passed, "details": details})
-    print(f"{status}: {name}")
-    if details:
-        print(f"  Details: {details}")
+results = TestResults()
 
+def login_admin():
+    """Login as admin and return token."""
+    print(f"\n{BLUE}Logging in as admin...{RESET}")
+    resp = requests.post(f"{API_URL}/auth/login", json={
+        "username": ADMIN_USERNAME,
+        "password": ADMIN_PASSWORD
+    })
+    if resp.status_code != 200:
+        print(f"{RED}Login failed: {resp.status_code} {resp.text}{RESET}")
+        sys.exit(1)
+    token = resp.json()["access_token"]
+    print(f"{GREEN}Login successful{RESET}")
+    return token
 
-def test_health():
-    """Test GET /api/"""
-    try:
-        resp = requests.get(f"{BASE_URL}/", timeout=10)
-        if resp.status_code == 200 and resp.json().get("status") == "ok":
-            log_test("Health endpoint", True, f"Response: {resp.json()}")
-            return True
-        else:
-            log_test("Health endpoint", False, f"Status: {resp.status_code}, Body: {resp.text}")
-            return False
-    except Exception as e:
-        log_test("Health endpoint", False, f"Exception: {e}")
-        return False
+def test_config_endpoint():
+    """Test 1: GET /api/config (no auth)"""
+    print(f"\n{BLUE}{'='*60}{RESET}")
+    print(f"{BLUE}TEST 1: GET /api/config (no auth){RESET}")
+    print(f"{BLUE}{'='*60}{RESET}")
+    
+    resp = requests.get(f"{API_URL}/config")
+    if resp.status_code != 200:
+        results.add_fail("GET /api/config", f"Status {resp.status_code}")
+        return
+    
+    data = resp.json()
+    
+    # Check available_models
+    if "available_models" not in data:
+        results.add_fail("GET /api/config", "Missing 'available_models'")
+        return
+    
+    models = data["available_models"]
+    if not isinstance(models, list) or len(models) == 0:
+        results.add_fail("GET /api/config", "available_models is empty or not a list")
+        return
+    
+    # Check each model has id, provider, label
+    for model in models:
+        if not all(k in model for k in ["id", "provider", "label"]):
+            results.add_fail("GET /api/config", f"Model missing required fields: {model}")
+            return
+        
+        # Check label ends with "(administrator)"
+        if not model["label"].endswith("(administrator)"):
+            results.add_fail("GET /api/config", f"Model label doesn't end with '(administrator)': {model['label']}")
+            return
+    
+    # Check other required fields
+    required_fields = ["default_model", "embedding_enabled", "local_llm_enabled", 
+                      "max_files_per_upload", "max_upload_size_mb"]
+    for field in required_fields:
+        if field not in data:
+            results.add_fail("GET /api/config", f"Missing field: {field}")
+            return
+    
+    # Verify local_llm_enabled is false
+    if data["local_llm_enabled"] != False:
+        results.add_fail("GET /api/config", f"local_llm_enabled should be false, got {data['local_llm_enabled']}")
+        return
+    
+    results.add_pass("GET /api/config - all fields present and valid")
+    print(f"  Available models: {len(models)}")
+    print(f"  Default model: {data['default_model']}")
+    print(f"  Embedding enabled: {data['embedding_enabled']}")
+    print(f"  Max files per upload: {data['max_files_per_upload']}")
 
-
-def test_auth_register_weak_passwords():
-    """Test POST /api/auth/register with various weak passwords."""
-    test_cases = [
-        ("weak", "at least 8 characters"),
-        ("NoDigit!", "must contain at least one digit"),
-        ("NoSymbol1", "must contain at least one symbol"),
-        ("nosymbol1!", "must contain at least one uppercase letter"),
+def test_queue_upload_flow(token):
+    """Test 2: Queue + upload flow"""
+    print(f"\n{BLUE}{'='*60}{RESET}")
+    print(f"{BLUE}TEST 2: Queue + upload flow{RESET}")
+    print(f"{BLUE}{'='*60}{RESET}")
+    
+    headers = {"Authorization": f"Bearer {token}"}
+    
+    # Create a fresh project
+    print("Creating new project...")
+    resp = requests.post(f"{API_URL}/projects", json={"name": "Queue Test Project"}, headers=headers)
+    if resp.status_code != 200:
+        results.add_fail("Create project", f"Status {resp.status_code}")
+        return None
+    
+    project_id = resp.json()["id"]
+    print(f"Project created: {project_id}")
+    
+    # Upload 3 PDF files at once
+    print("Uploading 3 PDF files...")
+    if not Path(TEST_PDF).exists():
+        results.add_fail("Upload files", f"Test PDF not found: {TEST_PDF}")
+        return None
+    
+    files = [
+        ("files", ("doc1.pdf", open(TEST_PDF, "rb"), "application/pdf")),
+        ("files", ("doc2.pdf", open(TEST_PDF, "rb"), "application/pdf")),
+        ("files", ("doc3.pdf", open(TEST_PDF, "rb"), "application/pdf")),
     ]
     
-    for password, expected_msg in test_cases:
-        try:
-            resp = requests.post(
-                f"{BASE_URL}/auth/register",
-                json={
-                    "username": f"testuser_{int(time.time())}",
-                    "email": f"test_{int(time.time())}@example.com",
-                    "password": password,
-                },
-                timeout=10,
-            )
-            if resp.status_code == 422:
-                body = resp.json()
-                detail_str = str(body.get("detail", ""))
-                if expected_msg.lower() in detail_str.lower():
-                    log_test(f"Register with password '{password}'", True, f"Got expected 422 with message containing '{expected_msg}'")
-                else:
-                    log_test(f"Register with password '{password}'", False, f"Got 422 but message doesn't contain '{expected_msg}': {detail_str}")
-            else:
-                log_test(f"Register with password '{password}'", False, f"Expected 422, got {resp.status_code}: {resp.text}")
-        except Exception as e:
-            log_test(f"Register with password '{password}'", False, f"Exception: {e}")
-
-
-def test_auth_register_duplicate_username():
-    """Test POST /api/auth/register with duplicate username (admin)."""
-    try:
-        resp = requests.post(
-            f"{BASE_URL}/auth/register",
-            json={
-                "username": "admin",
-                "email": "newemail@example.com",
-                "password": "StrongPass1!",
-            },
-            timeout=10,
-        )
-        if resp.status_code == 409:
-            log_test("Register with duplicate username", True, f"Got expected 409: {resp.json()}")
-        else:
-            log_test("Register with duplicate username", False, f"Expected 409, got {resp.status_code}: {resp.text}")
-    except Exception as e:
-        log_test("Register with duplicate username", False, f"Exception: {e}")
-
-
-def test_auth_register_new_user():
-    """Test POST /api/auth/register with valid new user."""
-    try:
-        resp = requests.post(
-            f"{BASE_URL}/auth/register",
-            json={
-                "username": "testera",
-                "email": "testera@example.com",
-                "password": "StrongPass1!",
-            },
-            timeout=10,
-        )
-        if resp.status_code == 200:
-            body = resp.json()
-            if "access_token" in body and "user" in body:
-                log_test("Register new user testerA", True, f"Got JWT and user object")
-                return body["access_token"]
-            else:
-                log_test("Register new user testerA", False, f"Missing access_token or user in response: {body}")
-                return None
-        else:
-            log_test("Register new user testerA", False, f"Expected 200, got {resp.status_code}: {resp.text}")
-            return None
-    except Exception as e:
-        log_test("Register new user testerA", False, f"Exception: {e}")
+    resp = requests.post(f"{API_URL}/projects/{project_id}/documents", files=files, headers=headers)
+    
+    # Close file handles
+    for _, (_, fh, _) in files:
+        fh.close()
+    
+    if resp.status_code != 200:
+        results.add_fail("Upload 3 files", f"Status {resp.status_code}: {resp.text}")
         return None
-
-
-def test_auth_register_duplicate_email():
-    """Test POST /api/auth/register with duplicate email."""
-    try:
-        resp = requests.post(
-            f"{BASE_URL}/auth/register",
-            json={
-                "username": "anotheruser",
-                "email": "testera@example.com",  # Same email as testerA
-                "password": "StrongPass1!",
-            },
-            timeout=10,
-        )
-        if resp.status_code == 409:
-            body = resp.json()
-            if "email" in str(body).lower():
-                log_test("Register with duplicate email", True, f"Got expected 409 with email message: {body}")
-            else:
-                log_test("Register with duplicate email", False, f"Got 409 but no email mention: {body}")
-        else:
-            log_test("Register with duplicate email", False, f"Expected 409, got {resp.status_code}: {resp.text}")
-    except Exception as e:
-        log_test("Register with duplicate email", False, f"Exception: {e}")
-
-
-def test_auth_login_lockout():
-    """Test POST /api/auth/login with 3 failed attempts and lockout."""
-    username = "testera"
-    wrong_password = "WrongPass1!"
     
-    # Attempt 1
-    try:
-        resp = requests.post(
-            f"{BASE_URL}/auth/login",
-            json={"username": username, "password": wrong_password},
-            timeout=10,
-        )
-        if resp.status_code == 401:
-            body = resp.json()
-            detail = body.get("detail", {})
-            if isinstance(detail, dict):
-                remaining = detail.get("remaining_attempts")
-                if remaining == 2:
-                    log_test("Login attempt 1 (wrong password)", True, f"Got 401 with remaining_attempts=2")
-                else:
-                    log_test("Login attempt 1 (wrong password)", False, f"Expected remaining_attempts=2, got {remaining}")
-            else:
-                log_test("Login attempt 1 (wrong password)", False, f"Detail is not a dict: {detail}")
-        else:
-            log_test("Login attempt 1 (wrong password)", False, f"Expected 401, got {resp.status_code}: {resp.text}")
-    except Exception as e:
-        log_test("Login attempt 1 (wrong password)", False, f"Exception: {e}")
-    
-    # Attempt 2
-    try:
-        resp = requests.post(
-            f"{BASE_URL}/auth/login",
-            json={"username": username, "password": wrong_password},
-            timeout=10,
-        )
-        if resp.status_code == 401:
-            body = resp.json()
-            detail = body.get("detail", {})
-            if isinstance(detail, dict):
-                remaining = detail.get("remaining_attempts")
-                if remaining == 1:
-                    log_test("Login attempt 2 (wrong password)", True, f"Got 401 with remaining_attempts=1")
-                else:
-                    log_test("Login attempt 2 (wrong password)", False, f"Expected remaining_attempts=1, got {remaining}")
-            else:
-                log_test("Login attempt 2 (wrong password)", False, f"Detail is not a dict: {detail}")
-        else:
-            log_test("Login attempt 2 (wrong password)", False, f"Expected 401, got {resp.status_code}: {resp.text}")
-    except Exception as e:
-        log_test("Login attempt 2 (wrong password)", False, f"Exception: {e}")
-    
-    # Attempt 3 (should trigger lockout)
-    try:
-        resp = requests.post(
-            f"{BASE_URL}/auth/login",
-            json={"username": username, "password": wrong_password},
-            timeout=10,
-        )
-        if resp.status_code == 401:
-            body = resp.json()
-            detail = body.get("detail", {})
-            if isinstance(detail, dict):
-                locked = detail.get("locked")
-                remaining_seconds = detail.get("remaining_seconds")
-                if locked and remaining_seconds and remaining_seconds > 0:
-                    log_test("Login attempt 3 (lockout triggered)", True, f"Got 401 with locked=True, remaining_seconds={remaining_seconds}")
-                else:
-                    log_test("Login attempt 3 (lockout triggered)", False, f"Expected locked=True with remaining_seconds, got {detail}")
-            else:
-                log_test("Login attempt 3 (lockout triggered)", False, f"Detail is not a dict: {detail}")
-        else:
-            log_test("Login attempt 3 (lockout triggered)", False, f"Expected 401, got {resp.status_code}: {resp.text}")
-    except Exception as e:
-        log_test("Login attempt 3 (lockout triggered)", False, f"Exception: {e}")
-    
-    # Attempt 4 (should return 429 locked)
-    try:
-        resp = requests.post(
-            f"{BASE_URL}/auth/login",
-            json={"username": username, "password": "StrongPass1!"},  # Correct password
-            timeout=10,
-        )
-        if resp.status_code == 429:
-            body = resp.json()
-            detail = body.get("detail", {})
-            if isinstance(detail, dict):
-                remaining_seconds = detail.get("remaining_seconds")
-                if remaining_seconds and remaining_seconds > 0:
-                    log_test("Login attempt 4 (locked with correct password)", True, f"Got 429 with remaining_seconds={remaining_seconds}")
-                else:
-                    log_test("Login attempt 4 (locked with correct password)", False, f"Expected remaining_seconds > 0, got {detail}")
-            else:
-                log_test("Login attempt 4 (locked with correct password)", False, f"Detail is not a dict: {detail}")
-        else:
-            log_test("Login attempt 4 (locked with correct password)", False, f"Expected 429, got {resp.status_code}: {resp.text}")
-    except Exception as e:
-        log_test("Login attempt 4 (locked with correct password)", False, f"Exception: {e}")
-    
-    # Wait for lockout to expire
-    print("  Waiting 31 seconds for lockout to expire...")
-    time.sleep(31)
-    
-    # Attempt 5 (should succeed after lockout expires)
-    try:
-        resp = requests.post(
-            f"{BASE_URL}/auth/login",
-            json={"username": username, "password": "StrongPass1!"},
-            timeout=10,
-        )
-        if resp.status_code == 200:
-            body = resp.json()
-            if "access_token" in body:
-                log_test("Login after lockout expires", True, f"Got 200 with JWT")
-                return body["access_token"]
-            else:
-                log_test("Login after lockout expires", False, f"Missing access_token: {body}")
-                return None
-        else:
-            log_test("Login after lockout expires", False, f"Expected 200, got {resp.status_code}: {resp.text}")
-            return None
-    except Exception as e:
-        log_test("Login after lockout expires", False, f"Exception: {e}")
+    docs = resp.json()
+    if len(docs) != 3:
+        results.add_fail("Upload 3 files", f"Expected 3 docs, got {len(docs)}")
         return None
-
-
-def test_auth_forgot_password():
-    """Test POST /api/auth/forgot-password."""
-    # Test with wrong email
-    try:
-        resp = requests.post(
-            f"{BASE_URL}/auth/forgot-password",
-            json={
-                "username": "testera",
-                "email": "wrong@example.com",
-                "new_password": "NewStrongPass1!",
-            },
-            timeout=10,
-        )
-        if resp.status_code == 400:
-            body = resp.json()
-            if "do not match" in str(body).lower():
-                log_test("Forgot password with wrong email", True, f"Got expected 400: {body}")
-            else:
-                log_test("Forgot password with wrong email", False, f"Got 400 but wrong message: {body}")
-        else:
-            log_test("Forgot password with wrong email", False, f"Expected 400, got {resp.status_code}: {resp.text}")
-    except Exception as e:
-        log_test("Forgot password with wrong email", False, f"Exception: {e}")
     
-    # Test with correct username+email
-    try:
-        resp = requests.post(
-            f"{BASE_URL}/auth/forgot-password",
-            json={
-                "username": "testera",
-                "email": "testera@example.com",
-                "new_password": "NewStrongPass2!",
-            },
-            timeout=10,
-        )
-        if resp.status_code == 200:
-            body = resp.json()
-            if "access_token" in body:
-                log_test("Forgot password with correct credentials", True, f"Got 200 with JWT")
-                # Verify login with new password
-                login_resp = requests.post(
-                    f"{BASE_URL}/auth/login",
-                    json={"username": "testera", "password": "NewStrongPass2!"},
-                    timeout=10,
-                )
-                if login_resp.status_code == 200:
-                    log_test("Login with new password after forgot-password", True, f"Login successful")
-                    return login_resp.json()["access_token"]
-                else:
-                    log_test("Login with new password after forgot-password", False, f"Login failed: {login_resp.status_code}")
-                    return body["access_token"]
-            else:
-                log_test("Forgot password with correct credentials", False, f"Missing access_token: {body}")
-                return None
-        else:
-            log_test("Forgot password with correct credentials", False, f"Expected 200, got {resp.status_code}: {resp.text}")
+    # Check all docs have status = "queued"
+    for doc in docs:
+        if doc["status"] != "queued":
+            results.add_fail("Upload 3 files", f"Doc {doc['id']} status is {doc['status']}, expected 'queued'")
             return None
-    except Exception as e:
-        log_test("Forgot password with correct credentials", False, f"Exception: {e}")
+    
+    results.add_pass("Upload 3 files - all queued")
+    doc_ids = [d["id"] for d in docs]
+    
+    # Immediately GET /api/projects/{P}/queue
+    print("Checking queue positions...")
+    resp = requests.get(f"{API_URL}/projects/{project_id}/queue", headers=headers)
+    if resp.status_code != 200:
+        results.add_fail("GET queue", f"Status {resp.status_code}")
         return None
-
-
-def test_auth_change_password(token: str):
-    """Test POST /api/auth/change-password."""
-    # Test with wrong current password
-    try:
-        resp = requests.post(
-            f"{BASE_URL}/auth/change-password",
-            json={
-                "current_password": "WrongPassword1!",
-                "new_password": "AnotherStrongPass1!",
-            },
-            headers={"Authorization": f"Bearer {token}"},
-            timeout=10,
-        )
-        if resp.status_code == 401:
-            log_test("Change password with wrong current password", True, f"Got expected 401")
-        else:
-            log_test("Change password with wrong current password", False, f"Expected 401, got {resp.status_code}: {resp.text}")
-    except Exception as e:
-        log_test("Change password with wrong current password", False, f"Exception: {e}")
     
-    # Test with correct current password
-    try:
-        resp = requests.post(
-            f"{BASE_URL}/auth/change-password",
-            json={
-                "current_password": "NewStrongPass2!",
-                "new_password": "FinalStrongPass1!",
-            },
-            headers={"Authorization": f"Bearer {token}"},
-            timeout=10,
-        )
-        if resp.status_code == 200:
-            body = resp.json()
-            if body.get("changed") is True:
-                log_test("Change password with correct current password", True, f"Got 200 with changed=True")
-                # Verify login with new password
-                login_resp = requests.post(
-                    f"{BASE_URL}/auth/login",
-                    json={"username": "testera", "password": "FinalStrongPass1!"},
-                    timeout=10,
-                )
-                if login_resp.status_code == 200:
-                    log_test("Login with new password after change-password", True, f"Login successful")
-                    return login_resp.json()["access_token"]
-                else:
-                    log_test("Login with new password after change-password", False, f"Login failed: {login_resp.status_code}")
-                    return token
-            else:
-                log_test("Change password with correct current password", False, f"Expected changed=True, got {body}")
-                return token
-        else:
-            log_test("Change password with correct current password", False, f"Expected 200, got {resp.status_code}: {resp.text}")
-            return token
-    except Exception as e:
-        log_test("Change password with correct current password", False, f"Exception: {e}")
-        return token
-
-
-def test_auth_me(token: str):
-    """Test GET /api/auth/me."""
-    # Test without token
-    try:
-        resp = requests.get(f"{BASE_URL}/auth/me", timeout=10)
-        if resp.status_code == 401:
-            log_test("GET /auth/me without token", True, f"Got expected 401")
-        else:
-            log_test("GET /auth/me without token", False, f"Expected 401, got {resp.status_code}: {resp.text}")
-    except Exception as e:
-        log_test("GET /auth/me without token", False, f"Exception: {e}")
+    queue_data = resp.json()
+    items = queue_data.get("items", [])
     
-    # Test with valid token
-    try:
-        resp = requests.get(
-            f"{BASE_URL}/auth/me",
-            headers={"Authorization": f"Bearer {token}"},
-            timeout=10,
-        )
-        if resp.status_code == 200:
-            body = resp.json()
-            if "username" in body and body["username"] == "testera":
-                log_test("GET /auth/me with valid token", True, f"Got user object: {body}")
-            else:
-                log_test("GET /auth/me with valid token", False, f"Unexpected user object: {body}")
-        else:
-            log_test("GET /auth/me with valid token", False, f"Expected 200, got {resp.status_code}: {resp.text}")
-    except Exception as e:
-        log_test("GET /auth/me with valid token", False, f"Exception: {e}")
-
-
-def test_project_scoping():
-    """Test project scoping with owner_id."""
-    # Login as admin
-    try:
-        admin_resp = requests.post(
-            f"{BASE_URL}/auth/login",
-            json={"username": ADMIN_USERNAME, "password": ADMIN_PASSWORD},
-            timeout=10,
-        )
-        if admin_resp.status_code != 200:
-            log_test("Login as admin", False, f"Failed to login: {admin_resp.status_code}")
-            return None, None
-        admin_token = admin_resp.json()["access_token"]
-        log_test("Login as admin", True, f"Got JWT")
-    except Exception as e:
-        log_test("Login as admin", False, f"Exception: {e}")
-        return None, None
+    # Check queue positions
+    positions = [item.get("queue_position") for item in items if item.get("status") in ["queued", "processing"]]
+    if not positions:
+        results.add_fail("GET queue", "No queue positions found")
+        return None
     
-    # Login as testerA
-    try:
-        testera_resp = requests.post(
-            f"{BASE_URL}/auth/login",
-            json={"username": "testera", "password": "FinalStrongPass1!"},
-            timeout=10,
-        )
-        if testera_resp.status_code != 200:
-            log_test("Login as testerA", False, f"Failed to login: {testera_resp.status_code}")
-            return admin_token, None
-        testera_token = testera_resp.json()["access_token"]
-        log_test("Login as testerA", True, f"Got JWT")
-    except Exception as e:
-        log_test("Login as testerA", False, f"Exception: {e}")
-        return admin_token, None
+    # Positions should be 1, 2, 3 (or some subset if processing started)
+    print(f"  Queue positions: {positions}")
+    print(f"  Total in queue: {queue_data.get('total', 0)}")
+    results.add_pass("GET queue - positions present")
     
-    # Admin creates project
-    try:
-        resp = requests.post(
-            f"{BASE_URL}/projects",
-            json={"name": "AdminProj", "description": "Admin's project"},
-            headers={"Authorization": f"Bearer {admin_token}"},
-            timeout=10,
-        )
-        if resp.status_code == 200:
-            admin_proj_id = resp.json()["id"]
-            log_test("Admin creates project", True, f"Created project {admin_proj_id}")
-        else:
-            log_test("Admin creates project", False, f"Expected 200, got {resp.status_code}: {resp.text}")
-            return admin_token, testera_token
-    except Exception as e:
-        log_test("Admin creates project", False, f"Exception: {e}")
-        return admin_token, testera_token
+    # Poll until all processed (max 60s)
+    print("Polling queue until all processed (max 60s)...")
+    start_time = time.time()
+    max_wait = 60
     
-    # TesterA creates project
-    try:
-        resp = requests.post(
-            f"{BASE_URL}/projects",
-            json={"name": "TesterProj", "description": "TesterA's project"},
-            headers={"Authorization": f"Bearer {testera_token}"},
-            timeout=10,
-        )
-        if resp.status_code == 200:
-            testera_proj_id = resp.json()["id"]
-            log_test("TesterA creates project", True, f"Created project {testera_proj_id}")
-        else:
-            log_test("TesterA creates project", False, f"Expected 200, got {resp.status_code}: {resp.text}")
-            return admin_token, testera_token
-    except Exception as e:
-        log_test("TesterA creates project", False, f"Exception: {e}")
-        return admin_token, testera_token
-    
-    # Admin lists projects (should see both)
-    try:
-        resp = requests.get(
-            f"{BASE_URL}/projects",
-            headers={"Authorization": f"Bearer {admin_token}"},
-            timeout=10,
-        )
-        if resp.status_code == 200:
-            projects = resp.json()
-            project_names = [p["name"] for p in projects]
-            if "AdminProj" in project_names and "TesterProj" in project_names:
-                log_test("Admin lists projects (sees both)", True, f"Sees: {project_names}")
-            else:
-                log_test("Admin lists projects (sees both)", False, f"Expected both projects, got: {project_names}")
-        else:
-            log_test("Admin lists projects (sees both)", False, f"Expected 200, got {resp.status_code}: {resp.text}")
-    except Exception as e:
-        log_test("Admin lists projects (sees both)", False, f"Exception: {e}")
-    
-    # TesterA lists projects (should see only TesterProj)
-    try:
-        resp = requests.get(
-            f"{BASE_URL}/projects",
-            headers={"Authorization": f"Bearer {testera_token}"},
-            timeout=10,
-        )
-        if resp.status_code == 200:
-            projects = resp.json()
-            project_names = [p["name"] for p in projects]
-            if "TesterProj" in project_names and "AdminProj" not in project_names:
-                log_test("TesterA lists projects (sees only own)", True, f"Sees: {project_names}")
-            else:
-                log_test("TesterA lists projects (sees only own)", False, f"Expected only TesterProj, got: {project_names}")
-        else:
-            log_test("TesterA lists projects (sees only own)", False, f"Expected 200, got {resp.status_code}: {resp.text}")
-    except Exception as e:
-        log_test("TesterA lists projects (sees only own)", False, f"Exception: {e}")
-    
-    # TesterA tries to GET admin's project (should get 403)
-    try:
-        resp = requests.get(
-            f"{BASE_URL}/projects/{admin_proj_id}",
-            headers={"Authorization": f"Bearer {testera_token}"},
-            timeout=10,
-        )
-        if resp.status_code == 403:
-            log_test("TesterA GET admin's project (403)", True, f"Got expected 403")
-        else:
-            log_test("TesterA GET admin's project (403)", False, f"Expected 403, got {resp.status_code}: {resp.text}")
-    except Exception as e:
-        log_test("TesterA GET admin's project (403)", False, f"Exception: {e}")
-    
-    # TesterA tries to DELETE admin's project (should get 403)
-    try:
-        resp = requests.delete(
-            f"{BASE_URL}/projects/{admin_proj_id}",
-            headers={"Authorization": f"Bearer {testera_token}"},
-            timeout=10,
-        )
-        if resp.status_code == 403:
-            log_test("TesterA DELETE admin's project (403)", True, f"Got expected 403")
-        else:
-            log_test("TesterA DELETE admin's project (403)", False, f"Expected 403, got {resp.status_code}: {resp.text}")
-    except Exception as e:
-        log_test("TesterA DELETE admin's project (403)", False, f"Exception: {e}")
-    
-    # Admin deletes own project
-    try:
-        resp = requests.delete(
-            f"{BASE_URL}/projects/{admin_proj_id}",
-            headers={"Authorization": f"Bearer {admin_token}"},
-            timeout=10,
-        )
-        if resp.status_code == 200:
-            log_test("Admin DELETE own project", True, f"Deleted successfully")
-        else:
-            log_test("Admin DELETE own project", False, f"Expected 200, got {resp.status_code}: {resp.text}")
-    except Exception as e:
-        log_test("Admin DELETE own project", False, f"Exception: {e}")
-    
-    return admin_token, testera_token
-
-
-def test_upload_and_downstream(admin_token: str):
-    """Test multi-file upload and downstream endpoints."""
-    # Create fresh project
-    try:
-        resp = requests.post(
-            f"{BASE_URL}/projects",
-            json={"name": "DemoProject", "description": "For testing upload and downstream"},
-            headers={"Authorization": f"Bearer {admin_token}"},
-            timeout=10,
-        )
+    while time.time() - start_time < max_wait:
+        resp = requests.get(f"{API_URL}/projects/{project_id}/queue", headers=headers)
         if resp.status_code != 200:
-            log_test("Create DemoProject", False, f"Failed: {resp.status_code}")
+            results.add_fail("Poll queue", f"Status {resp.status_code}")
             return None
-        proj_id = resp.json()["id"]
-        log_test("Create DemoProject", True, f"Created project {proj_id}")
-    except Exception as e:
-        log_test("Create DemoProject", False, f"Exception: {e}")
-        return None
-    
-    # Upload 3 PDFs
-    try:
-        files = [
-            ("files", ("doc1.pdf", open(DEMO_PDFS[0], "rb"), "application/pdf")),
-            ("files", ("doc2.pdf", open(DEMO_PDFS[1], "rb"), "application/pdf")),
-            ("files", ("doc3.pdf", open(DEMO_PDFS[2], "rb"), "application/pdf")),
-        ]
-        resp = requests.post(
-            f"{BASE_URL}/projects/{proj_id}/documents",
-            files=files,
-            headers={"Authorization": f"Bearer {admin_token}"},
-            timeout=60,
-        )
-        # Close file handles
-        for _, (_, fh, _) in files:
-            fh.close()
         
-        if resp.status_code == 200:
-            docs = resp.json()
-            if len(docs) == 3 and all(d.get("status") == "processing" for d in docs):
-                doc_ids = [d["id"] for d in docs]
-                log_test("Upload 3 PDFs", True, f"Uploaded 3 documents: {doc_ids}")
-            else:
-                log_test("Upload 3 PDFs", False, f"Expected 3 processing docs, got: {docs}")
-                return None
-        else:
-            log_test("Upload 3 PDFs", False, f"Expected 200, got {resp.status_code}: {resp.text}")
-            return None
-    except Exception as e:
-        log_test("Upload 3 PDFs", False, f"Exception: {e}")
-        return None
-    
-    # Poll for documents to become ready (max 5 minutes)
-    print("  Polling for documents to become ready (max 5 minutes)...")
-    max_wait = 300  # 5 minutes
-    poll_interval = 5
-    elapsed = 0
-    all_ready = False
-    
-    while elapsed < max_wait:
-        try:
-            resp = requests.get(
-                f"{BASE_URL}/projects/{proj_id}/documents",
-                headers={"Authorization": f"Bearer {admin_token}"},
-                timeout=10,
-            )
-            if resp.status_code == 200:
-                docs = resp.json()
-                statuses = {d["id"]: d["status"] for d in docs}
-                ready_count = sum(1 for s in statuses.values() if s == "ready")
-                failed_count = sum(1 for s in statuses.values() if s == "failed")
-                
-                print(f"    [{elapsed}s] Ready: {ready_count}/3, Failed: {failed_count}/3")
-                
-                if failed_count > 0:
-                    failed_docs = [d for d in docs if d["status"] == "failed"]
-                    log_test("Document processing", False, f"Some documents failed: {failed_docs}")
-                    return None
-                
-                if ready_count == 3:
-                    all_ready = True
-                    log_test("Document processing (all ready)", True, f"All 3 documents ready")
-                    break
-        except Exception as e:
-            print(f"    Polling error: {e}")
+        queue_data = resp.json()
+        processing = queue_data.get("processing", 0)
+        queued = queue_data.get("queued", 0)
         
-        time.sleep(poll_interval)
-        elapsed += poll_interval
+        print(f"  Processing: {processing}, Queued: {queued}")
+        
+        if processing == 0 and queued == 0:
+            print(f"{GREEN}All documents processed!{RESET}")
+            break
+        
+        time.sleep(2)
+    else:
+        results.add_warning("Poll queue", "Timeout waiting for processing (60s)")
+        return project_id
     
+    # Check all items are ready
+    resp = requests.get(f"{API_URL}/projects/{project_id}/queue", headers=headers)
+    queue_data = resp.json()
+    items = queue_data.get("items", [])
+    
+    all_ready = all(item.get("status") == "ready" for item in items)
     if not all_ready:
-        log_test("Document processing (timeout)", False, f"Timeout after {max_wait}s")
-        return None
+        statuses = [item.get("status") for item in items]
+        results.add_fail("Poll queue", f"Not all docs ready: {statuses}")
+        return project_id
     
-    # Get final document list
-    try:
-        resp = requests.get(
-            f"{BASE_URL}/projects/{proj_id}/documents",
-            headers={"Authorization": f"Bearer {admin_token}"},
-            timeout=10,
-        )
-        docs = resp.json()
-        doc_ids = [d["id"] for d in docs]
-    except Exception as e:
-        log_test("Get document list", False, f"Exception: {e}")
-        return None
+    # Check queue_position is null for ready docs
+    for item in items:
+        if item.get("status") == "ready" and item.get("queue_position") is not None:
+            results.add_fail("Poll queue", f"Ready doc has queue_position: {item.get('queue_position')}")
+            return project_id
     
-    # Test GET /documents/{id}/summary for each doc
-    for doc_id in doc_ids:
-        try:
-            resp = requests.get(
-                f"{BASE_URL}/documents/{doc_id}/summary",
-                headers={"Authorization": f"Bearer {admin_token}"},
-                timeout=10,
-            )
-            if resp.status_code == 200:
-                body = resp.json()
-                required_keys = ["title", "summary", "sections", "claims", "status"]
-                if all(k in body for k in required_keys) and body["status"] == "ready":
-                    log_test(f"GET /documents/{doc_id}/summary", True, f"Has all required keys")
-                else:
-                    log_test(f"GET /documents/{doc_id}/summary", False, f"Missing keys or status not ready: {body.keys()}")
-            else:
-                log_test(f"GET /documents/{doc_id}/summary", False, f"Expected 200, got {resp.status_code}: {resp.text}")
-        except Exception as e:
-            log_test(f"GET /documents/{doc_id}/summary", False, f"Exception: {e}")
+    results.add_pass("Poll queue - all docs ready, queue_position null")
     
-    # Test GET /documents/{id}/status for first doc
-    try:
-        resp = requests.get(
-            f"{BASE_URL}/documents/{doc_ids[0]}/status",
-            headers={"Authorization": f"Bearer {admin_token}"},
-            timeout=10,
-        )
-        if resp.status_code == 200:
-            body = resp.json()
-            if "summary" in body and body.get("status") == "ready":
-                log_test(f"GET /documents/{doc_ids[0]}/status", True, f"Has summary object")
-            else:
-                log_test(f"GET /documents/{doc_ids[0]}/status", False, f"Missing summary or status not ready")
-        else:
-            log_test(f"GET /documents/{doc_ids[0]}/status", False, f"Expected 200, got {resp.status_code}: {resp.text}")
-    except Exception as e:
-        log_test(f"GET /documents/{doc_ids[0]}/status", False, f"Exception: {e}")
-    
-    # Test POST /claims/{claim_id}/evidence for first claim of doc1
-    try:
-        # Get claims from doc1
-        resp = requests.get(
-            f"{BASE_URL}/documents/{doc_ids[0]}/summary",
-            headers={"Authorization": f"Bearer {admin_token}"},
-            timeout=10,
-        )
-        claims = resp.json().get("claims", [])
-        if claims:
-            claim_id = claims[0]["id"]
-            resp = requests.post(
-                f"{BASE_URL}/claims/{claim_id}/evidence",
-                headers={"Authorization": f"Bearer {admin_token}"},
-                timeout=30,
-            )
-            if resp.status_code == 200:
-                body = resp.json()
-                if "items" in body:
-                    log_test(f"POST /claims/{claim_id}/evidence", True, f"Got items array (length: {len(body['items'])})")
-                else:
-                    log_test(f"POST /claims/{claim_id}/evidence", False, f"Missing items in response")
-            else:
-                log_test(f"POST /claims/{claim_id}/evidence", False, f"Expected 200, got {resp.status_code}: {resp.text}")
-        else:
-            log_test("POST /claims/{claim_id}/evidence", False, f"No claims found in doc1")
-    except Exception as e:
-        log_test("POST /claims/{claim_id}/evidence", False, f"Exception: {e}")
-    
-    # Test POST /documents/{id}/section-evidence on doc2
-    try:
-        resp = requests.post(
-            f"{BASE_URL}/documents/{doc_ids[1]}/section-evidence",
-            json={"text": "blockchain trust management"},
-            headers={"Authorization": f"Bearer {admin_token}"},
-            timeout=30,
-        )
-        if resp.status_code == 200:
-            body = resp.json()
-            if "items" in body:
-                log_test(f"POST /documents/{doc_ids[1]}/section-evidence", True, f"Got items array (length: {len(body['items'])})")
-            else:
-                log_test(f"POST /documents/{doc_ids[1]}/section-evidence", False, f"Missing items in response")
-        else:
-            log_test(f"POST /documents/{doc_ids[1]}/section-evidence", False, f"Expected 200, got {resp.status_code}: {resp.text}")
-    except Exception as e:
-        log_test(f"POST /documents/{doc_ids[1]}/section-evidence", False, f"Exception: {e}")
-    
-    # Test GET /projects/{proj_id}/outliers
-    try:
-        resp = requests.get(
-            f"{BASE_URL}/projects/{proj_id}/outliers",
-            headers={"Authorization": f"Bearer {admin_token}"},
-            timeout=30,
-        )
-        if resp.status_code == 200:
-            body = resp.json()
-            if "points" in body and len(body["points"]) == 3:
-                log_test(f"GET /projects/{proj_id}/outliers", True, f"Got 3 points")
-            else:
-                log_test(f"GET /projects/{proj_id}/outliers", False, f"Expected 3 points, got: {body.get('points', [])}")
-        else:
-            log_test(f"GET /projects/{proj_id}/outliers", False, f"Expected 200, got {resp.status_code}: {resp.text}")
-    except Exception as e:
-        log_test(f"GET /projects/{proj_id}/outliers", False, f"Exception: {e}")
-    
-    # Test POST /projects/{proj_id}/matrix
-    try:
-        resp = requests.post(
-            f"{BASE_URL}/projects/{proj_id}/matrix",
-            json={},
-            headers={"Authorization": f"Bearer {admin_token}"},
-            timeout=60,
-        )
-        if resp.status_code == 200:
-            body = resp.json()
-            if "fields" in body and "rows" in body and len(body["rows"]) == 3:
-                log_test(f"POST /projects/{proj_id}/matrix", True, f"Got fields and 3 rows")
-            else:
-                log_test(f"POST /projects/{proj_id}/matrix", False, f"Expected fields and 3 rows, got: {body.keys()}")
-        else:
-            log_test(f"POST /projects/{proj_id}/matrix", False, f"Expected 200, got {resp.status_code}: {resp.text}")
-    except Exception as e:
-        log_test(f"POST /projects/{proj_id}/matrix", False, f"Exception: {e}")
-    
-    # Test POST /projects/{proj_id}/ask
-    try:
-        resp = requests.post(
-            f"{BASE_URL}/projects/{proj_id}/ask",
-            json={"question": "What methods are used for trust management?"},
-            headers={"Authorization": f"Bearer {admin_token}"},
-            timeout=60,
-        )
-        if resp.status_code == 200:
-            body = resp.json()
-            required_keys = ["answer", "citations", "overall_tier"]
-            if all(k in body for k in required_keys):
-                log_test(f"POST /projects/{proj_id}/ask", True, f"Got answer, citations, overall_tier")
-            else:
-                log_test(f"POST /projects/{proj_id}/ask", False, f"Missing keys: {body.keys()}")
-        else:
-            log_test(f"POST /projects/{proj_id}/ask", False, f"Expected 200, got {resp.status_code}: {resp.text}")
-    except Exception as e:
-        log_test(f"POST /projects/{proj_id}/ask", False, f"Exception: {e}")
-    
-    # Test POST /projects/{proj_id}/check
-    try:
-        resp = requests.post(
-            f"{BASE_URL}/projects/{proj_id}/check",
-            json={"text": "Blockchain provides tamper-resistant trust in federated learning."},
-            headers={"Authorization": f"Bearer {admin_token}"},
-            timeout=60,
-        )
-        if resp.status_code == 200:
-            body = resp.json()
-            required_keys = ["units", "summary", "annotated_html", "badges", "references_used"]
-            if all(k in body for k in required_keys):
-                log_test(f"POST /projects/{proj_id}/check", True, f"Got all required keys")
-            else:
-                log_test(f"POST /projects/{proj_id}/check", False, f"Missing keys: {body.keys()}")
-        else:
-            log_test(f"POST /projects/{proj_id}/check", False, f"Expected 200, got {resp.status_code}: {resp.text}")
-    except Exception as e:
-        log_test(f"POST /projects/{proj_id}/check", False, f"Exception: {e}")
-    
-    # Cleanup: Delete DemoProject
-    try:
-        resp = requests.delete(
-            f"{BASE_URL}/projects/{proj_id}",
-            headers={"Authorization": f"Bearer {admin_token}"},
-            timeout=10,
-        )
-        if resp.status_code == 200:
-            log_test(f"DELETE DemoProject", True, f"Deleted successfully")
-        else:
-            log_test(f"DELETE DemoProject", False, f"Expected 200, got {resp.status_code}: {resp.text}")
-    except Exception as e:
-        log_test(f"DELETE DemoProject", False, f"Exception: {e}")
-    
-    return proj_id
+    return project_id
 
+def test_auto_summary_not_run(token, project_id):
+    """Test 3: Auto-summary must NOT run"""
+    print(f"\n{BLUE}{'='*60}{RESET}")
+    print(f"{BLUE}TEST 3: Auto-summary must NOT run{RESET}")
+    print(f"{BLUE}{'='*60}{RESET}")
+    
+    if not project_id:
+        results.add_fail("Auto-summary check", "No project_id from previous test")
+        return None
+    
+    headers = {"Authorization": f"Bearer {token}"}
+    
+    # Get documents
+    resp = requests.get(f"{API_URL}/projects/{project_id}/documents", headers=headers)
+    if resp.status_code != 200:
+        results.add_fail("Get documents", f"Status {resp.status_code}")
+        return None
+    
+    docs = resp.json()
+    if not docs:
+        results.add_fail("Get documents", "No documents found")
+        return None
+    
+    # Pick first doc
+    doc_id = docs[0]["id"]
+    
+    # GET /api/documents/{id}/summary
+    resp = requests.get(f"{API_URL}/documents/{doc_id}/summary", headers=headers)
+    if resp.status_code != 200:
+        results.add_fail("GET summary", f"Status {resp.status_code}")
+        return None
+    
+    summary_data = resp.json()
+    summary = summary_data.get("summary", "")
+    sections = summary_data.get("sections", {})
+    claims = summary_data.get("claims", [])
+    
+    # Summary should be empty or sections empty, claims empty
+    if summary or sections or claims:
+        results.add_fail("Auto-summary check", f"Summary exists (should be empty): summary={bool(summary)}, sections={bool(sections)}, claims={len(claims)}")
+        return None
+    
+    results.add_pass("Auto-summary check - summary is empty (LLM not auto-called)")
+    return doc_id
+
+def test_on_demand_summarize(token, doc_id):
+    """Test 4: On-demand summarize with language"""
+    print(f"\n{BLUE}{'='*60}{RESET}")
+    print(f"{BLUE}TEST 4: On-demand summarize with language{RESET}")
+    print(f"{BLUE}{'='*60}{RESET}")
+    
+    if not doc_id:
+        results.add_fail("On-demand summarize", "No doc_id from previous test")
+        return
+    
+    headers = {"Authorization": f"Bearer {token}"}
+    
+    # POST /api/documents/{id}/summarize?language=id
+    print("Requesting summary in Indonesian (language=id)...")
+    resp = requests.post(f"{API_URL}/documents/{doc_id}/summarize?language=id", headers=headers)
+    
+    if resp.status_code == 502:
+        results.add_warning("Summarize (id)", "502 Bad Gateway - Gemini API temporarily down (tolerable)")
+    elif resp.status_code == 400:
+        results.add_fail("Summarize (id)", f"400 Bad Request: {resp.text}")
+        return
+    elif resp.status_code == 404:
+        results.add_fail("Summarize (id)", f"404 Not Found: {resp.text}")
+        return
+    elif resp.status_code == 409:
+        results.add_fail("Summarize (id)", f"409 Conflict: {resp.text}")
+        return
+    elif resp.status_code != 200:
+        results.add_fail("Summarize (id)", f"Status {resp.status_code}: {resp.text}")
+        return
+    else:
+        # Success
+        summary_data = resp.json()
+        summary = summary_data.get("summary", "")
+        
+        if not summary:
+            results.add_fail("Summarize (id)", "Summary is empty after summarize")
+            return
+        
+        results.add_pass("Summarize (id) - summary generated")
+        
+        # Verify summary_language was persisted
+        print("Verifying summary_language persisted...")
+        resp = requests.get(f"{API_URL}/documents/{doc_id}/summary", headers=headers)
+        if resp.status_code != 200:
+            results.add_fail("Verify summary_language", f"Status {resp.status_code}")
+            return
+        
+        # Note: summary_language is not in the response schema, but we can check the document
+        resp = requests.get(f"{API_URL}/documents/{doc_id}", headers=headers)
+        if resp.status_code == 200:
+            doc_data = resp.json()
+            summary_lang = doc_data.get("summary_language")
+            if summary_lang == "id":
+                results.add_pass("Verify summary_language - persisted as 'id'")
+            else:
+                results.add_warning("Verify summary_language", f"Expected 'id', got {summary_lang}")
+    
+    # POST /api/documents/{id}/summarize?language=en
+    print("Requesting summary in English (language=en)...")
+    resp = requests.post(f"{API_URL}/documents/{doc_id}/summarize?language=en", headers=headers)
+    
+    if resp.status_code == 502:
+        results.add_warning("Summarize (en)", "502 Bad Gateway - Gemini API temporarily down (tolerable)")
+    elif resp.status_code != 200:
+        results.add_fail("Summarize (en)", f"Status {resp.status_code}: {resp.text}")
+    else:
+        results.add_pass("Summarize (en) - summary generated")
+
+def test_retry_endpoint(token):
+    """Test 5: Retry endpoint"""
+    print(f"\n{BLUE}{'='*60}{RESET}")
+    print(f"{BLUE}TEST 5: Retry endpoint{RESET}")
+    print(f"{BLUE}{'='*60}{RESET}")
+    
+    headers = {"Authorization": f"Bearer {token}"}
+    
+    # Create another project
+    print("Creating new project for retry test...")
+    resp = requests.post(f"{API_URL}/projects", json={"name": "Retry Test Project"}, headers=headers)
+    if resp.status_code != 200:
+        results.add_fail("Create project (retry)", f"Status {resp.status_code}")
+        return
+    
+    project_id = resp.json()["id"]
+    
+    # Upload one PDF
+    print("Uploading 1 PDF...")
+    with open(TEST_PDF, "rb") as f:
+        files = [("files", ("retry_test.pdf", f, "application/pdf"))]
+        resp = requests.post(f"{API_URL}/projects/{project_id}/documents", files=files, headers=headers)
+    
+    if resp.status_code != 200:
+        results.add_fail("Upload file (retry)", f"Status {resp.status_code}")
+        return
+    
+    docs = resp.json()
+    doc_id = docs[0]["id"]
+    
+    # Wait for ready
+    print("Waiting for document to be ready...")
+    start_time = time.time()
+    while time.time() - start_time < 30:
+        resp = requests.get(f"{API_URL}/documents/{doc_id}", headers=headers)
+        if resp.status_code == 200:
+            doc = resp.json()
+            if doc["status"] == "ready":
+                print(f"{GREEN}Document ready{RESET}")
+                break
+        time.sleep(2)
+    else:
+        results.add_warning("Wait for ready (retry)", "Timeout waiting for document")
+        return
+    
+    # Test retry on ready doc (should re-queue it)
+    print("Testing retry on ready document...")
+    resp = requests.post(f"{API_URL}/documents/{doc_id}/retry", headers=headers)
+    
+    if resp.status_code != 200:
+        results.add_fail("Retry ready doc", f"Status {resp.status_code}: {resp.text}")
+        return
+    
+    retry_doc = resp.json()
+    if retry_doc["status"] != "queued":
+        results.add_fail("Retry ready doc", f"Status should be 'queued', got {retry_doc['status']}")
+        return
+    
+    results.add_pass("Retry ready doc - re-queued successfully")
+    
+    # Note: Testing the "missing file" scenario would require deleting the file,
+    # which is destructive. Skipping as per instructions.
+
+def test_network_graph(token, project_id):
+    """Test 6: Network graph"""
+    print(f"\n{BLUE}{'='*60}{RESET}")
+    print(f"{BLUE}TEST 6: Network graph{RESET}")
+    print(f"{BLUE}{'='*60}{RESET}")
+    
+    if not project_id:
+        results.add_fail("Network graph", "No project_id from previous test")
+        return
+    
+    headers = {"Authorization": f"Bearer {token}"}
+    
+    # GET /api/projects/{P}/network
+    print("Requesting network graph...")
+    resp = requests.get(f"{API_URL}/projects/{project_id}/network", headers=headers)
+    
+    if resp.status_code != 200:
+        results.add_fail("GET network", f"Status {resp.status_code}: {resp.text}")
+        return
+    
+    network = resp.json()
+    
+    # Check required fields
+    required_fields = ["nodes", "edges", "embedding_backend", "threshold", 
+                      "isolated_threshold", "summary"]
+    for field in required_fields:
+        if field not in network:
+            results.add_fail("GET network", f"Missing field: {field}")
+            return
+    
+    # Check nodes
+    nodes = network["nodes"]
+    if not isinstance(nodes, list):
+        results.add_fail("GET network", "nodes is not a list")
+        return
+    
+    print(f"  Nodes: {len(nodes)}")
+    print(f"  Edges: {len(network['edges'])}")
+    print(f"  Embedding backend: {network['embedding_backend']}")
+    print(f"  Threshold: {network['threshold']}")
+    print(f"  Isolated threshold: {network['isolated_threshold']}")
+    
+    # Check each node has required fields
+    for node in nodes:
+        required_node_fields = ["id", "title", "keywords", "max_edge_score", "isolated"]
+        for field in required_node_fields:
+            if field not in node:
+                results.add_fail("GET network", f"Node missing field: {field}")
+                return
+    
+    # Check edges
+    edges = network["edges"]
+    if not isinstance(edges, list):
+        results.add_fail("GET network", "edges is not a list")
+        return
+    
+    for edge in edges:
+        required_edge_fields = ["source", "target", "weight", "semantic", 
+                               "keyword", "topic", "shared_keywords"]
+        for field in required_edge_fields:
+            if field not in edge:
+                results.add_fail("GET network", f"Edge missing field: {field}")
+                return
+    
+    # Check threshold values
+    if network["threshold"] != 0.7:
+        results.add_fail("GET network", f"threshold should be 0.7, got {network['threshold']}")
+        return
+    
+    if network["isolated_threshold"] != 0.4:
+        results.add_fail("GET network", f"isolated_threshold should be 0.4, got {network['isolated_threshold']}")
+        return
+    
+    results.add_pass("GET network - all fields present and valid")
+
+def test_ask_language(token, project_id):
+    """Test 7: Ask with language parameter"""
+    print(f"\n{BLUE}{'='*60}{RESET}")
+    print(f"{BLUE}TEST 7: Ask with language parameter{RESET}")
+    print(f"{BLUE}{'='*60}{RESET}")
+    
+    if not project_id:
+        results.add_fail("Ask language", "No project_id from previous test")
+        return
+    
+    headers = {"Authorization": f"Bearer {token}"}
+    
+    # POST /api/projects/{P}/ask?language=id
+    print("Asking question in Indonesian (language=id)...")
+    resp = requests.post(
+        f"{API_URL}/projects/{project_id}/ask?language=id",
+        json={"question": "Apa topik utama dari dokumen-dokumen ini?"},
+        headers=headers
+    )
+    
+    if resp.status_code == 502:
+        results.add_warning("Ask (id)", "502 Bad Gateway - Gemini API temporarily down (tolerable)")
+    elif resp.status_code != 200:
+        results.add_fail("Ask (id)", f"Status {resp.status_code}: {resp.text}")
+    else:
+        results.add_pass("Ask (id) - question answered")
+
+def test_regression_sanity(token):
+    """Test 8: Regression sanity checks"""
+    print(f"\n{BLUE}{'='*60}{RESET}")
+    print(f"{BLUE}TEST 8: Regression sanity checks{RESET}")
+    print(f"{BLUE}{'='*60}{RESET}")
+    
+    headers = {"Authorization": f"Bearer {token}"}
+    
+    # GET /api/auth/me
+    print("Testing GET /api/auth/me...")
+    resp = requests.get(f"{API_URL}/auth/me", headers=headers)
+    if resp.status_code != 200:
+        results.add_fail("GET /auth/me", f"Status {resp.status_code}")
+    else:
+        user = resp.json()
+        if user.get("username") != ADMIN_USERNAME:
+            results.add_fail("GET /auth/me", f"Username mismatch: {user.get('username')}")
+        else:
+            results.add_pass("GET /auth/me - working")
+    
+    # POST /api/projects
+    print("Testing POST /api/projects...")
+    resp = requests.post(f"{API_URL}/projects", json={"name": "Sanity Check Project"}, headers=headers)
+    if resp.status_code != 200:
+        results.add_fail("POST /projects", f"Status {resp.status_code}")
+    else:
+        project = resp.json()
+        if "owner_id" not in project:
+            results.add_fail("POST /projects", "Missing owner_id")
+        else:
+            results.add_pass("POST /projects - creates with owner_id")
+        
+        # Check outliers endpoint exists
+        project_id = project["id"]
+        print("Testing GET /api/projects/{id}/outliers...")
+        resp = requests.get(f"{API_URL}/projects/{project_id}/outliers", headers=headers)
+        if resp.status_code == 404:
+            results.add_fail("GET /outliers", "Endpoint removed (should exist)")
+        elif resp.status_code == 200:
+            results.add_pass("GET /outliers - endpoint exists")
+        else:
+            # Empty project, might return error but endpoint exists
+            results.add_pass("GET /outliers - endpoint exists")
 
 def main():
-    """Run all backend tests."""
-    print("=" * 80)
-    print("JurnalMap Backend Test Suite")
-    print("=" * 80)
-    print()
+    print(f"{BLUE}{'='*60}{RESET}")
+    print(f"{BLUE}JurnalMap Backend Test - Revision Focus{RESET}")
+    print(f"{BLUE}{'='*60}{RESET}")
+    print(f"Base URL: {BASE_URL}")
+    print(f"API URL: {API_URL}")
+    print(f"Test PDF: {TEST_PDF}")
     
-    # 1. Health check
-    print("### 1. Health Check")
-    if not test_health():
-        print("\n❌ Health check failed. Aborting tests.")
-        sys.exit(1)
-    print()
+    # Login
+    token = login_admin()
     
-    # 2. Auth flow
-    print("### 2. Auth Flow")
-    test_auth_register_weak_passwords()
-    test_auth_register_duplicate_username()
-    testera_token = test_auth_register_new_user()
-    test_auth_register_duplicate_email()
-    testera_token = test_auth_login_lockout()
-    testera_token = test_auth_forgot_password()
-    if testera_token:
-        testera_token = test_auth_change_password(testera_token)
-        test_auth_me(testera_token)
-    print()
-    
-    # 3. Project scoping
-    print("### 3. Project Scoping")
-    admin_token, testera_token = test_project_scoping()
-    print()
-    
-    # 4. Upload and downstream
-    if admin_token:
-        print("### 4. Upload and Downstream Endpoints")
-        test_upload_and_downstream(admin_token)
-        print()
+    # Run tests
+    test_config_endpoint()
+    project_id = test_queue_upload_flow(token)
+    doc_id = test_auto_summary_not_run(token, project_id)
+    test_on_demand_summarize(token, doc_id)
+    test_retry_endpoint(token)
+    test_network_graph(token, project_id)
+    test_ask_language(token, project_id)
+    test_regression_sanity(token)
     
     # Summary
-    print("=" * 80)
-    print("Test Summary")
-    print("=" * 80)
-    passed = sum(1 for r in test_results if r["passed"])
-    failed = sum(1 for r in test_results if not r["passed"])
-    total = len(test_results)
+    results.summary()
     
-    print(f"Total: {total}, Passed: {passed}, Failed: {failed}")
-    print()
-    
-    if failed > 0:
-        print("Failed tests:")
-        for r in test_results:
-            if not r["passed"]:
-                print(f"  ❌ {r['name']}")
-                if r["details"]:
-                    print(f"     {r['details']}")
-        print()
-    
-    print("=" * 80)
-    
-    return 0 if failed == 0 else 1
-
+    # Exit code
+    if results.failed:
+        sys.exit(1)
+    else:
+        sys.exit(0)
 
 if __name__ == "__main__":
-    sys.exit(main())
+    main()

@@ -57,6 +57,7 @@ export const api = {
   // ── Settings ─────────────────────────────────────────────────
   getSettings: () => http.get("/settings").then((r) => r.data),
   updateSettings: (patch) => http.put("/settings", patch).then((r) => r.data),
+  getConfig: () => http.get("/config").then((r) => r.data),
 
   // ── Documents ────────────────────────────────────────────────
   listDocuments: (projectId) =>
@@ -77,6 +78,8 @@ export const api = {
       })
       .then((r) => r.data);
   },
+  retryDocument: (id) => http.post(`/documents/${id}/retry`).then((r) => r.data),
+  queue: (projectId) => http.get(`/projects/${projectId}/queue`).then((r) => r.data),
   // Backwards-compat alias so any leftover callers keep working.
   uploadDocument: (projectId, file) =>
     api.uploadDocuments(projectId, [file]),
@@ -86,10 +89,15 @@ export const api = {
   deleteDocument: (id) => http.delete(`/documents/${id}`).then((r) => r.data),
   getSummary: (id) => http.get(`/documents/${id}/summary`).then((r) => r.data),
   getStatus: (id) => http.get(`/documents/${id}/status`).then((r) => r.data),
-  resummarize: (id, model, personaOverride = null) =>
-    http
-      .post(`/documents/${id}/summarize${model ? `?model=${encodeURIComponent(model)}` : ""}`, personaOverride || {})
-      .then((r) => r.data),
+  resummarize: (id, model, personaOverride = null, language = null) => {
+    const params = new URLSearchParams();
+    if (model) params.set("model", model);
+    if (language) params.set("language", language);
+    const qs = params.toString();
+    return http
+      .post(`/documents/${id}/summarize${qs ? `?${qs}` : ""}`, personaOverride || {})
+      .then((r) => r.data);
+  },
   pdfUrl: (id) => `${API}/documents/${id}/pdf`,
 
   // ── Evidence ─────────────────────────────────────────────────
@@ -98,9 +106,13 @@ export const api = {
   evidenceForSection: (docId, text) =>
     http.post(`/documents/${docId}/section-evidence`, { text }).then((r) => r.data),
 
-  // ── Outliers ─────────────────────────────────────────────────
+  // ── Outliers (legacy — replaced by Network) ──────────────────
   outliers: (projectId) =>
     http.get(`/projects/${projectId}/outliers`).then((r) => r.data),
+
+  // ── Network Graph ────────────────────────────────────────────
+  network: (projectId) =>
+    http.get(`/projects/${projectId}/network`).then((r) => r.data),
 
   // ── Matrix ──────────────────────────────────────────────────
   matrix: (projectId, documentIds = null, refresh = false, method = "default") =>
@@ -109,10 +121,14 @@ export const api = {
       .then((r) => r.data),
 
   // ── Ask ─────────────────────────────────────────────────────
-  ask: (projectId, question) =>
-    http
-      .post(`/projects/${projectId}/ask`, { question })
-      .then((r) => r.data),
+  ask: (projectId, question, language = null) => {
+    const params = new URLSearchParams();
+    if (language) params.set("language", language);
+    const qs = params.toString();
+    return http
+      .post(`/projects/${projectId}/ask${qs ? `?${qs}` : ""}`, { question })
+      .then((r) => r.data);
+  },
 
   // ── Check & Fix ────────────────────────────────────────────────
   runCheck: (projectId, payload) =>

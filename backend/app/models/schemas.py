@@ -33,7 +33,11 @@ class Project(BaseModel):
 
 
 # ----- Document -----
-DocStatus = Literal["processing", "ready", "failed"]
+# queued = waiting in FIFO queue
+# processing = currently being parsed by worker
+# ready = parsed OK, sentences stored, summary optional (built on demand)
+# failed = terminal failure — user can retry
+DocStatus = Literal["queued", "processing", "ready", "failed"]
 
 
 class DocumentMeta(BaseModel):
@@ -41,16 +45,18 @@ class DocumentMeta(BaseModel):
     id: str = Field(default_factory=new_uid)
     project_id: str
     filename: str
-    status: DocStatus = "processing"
+    status: DocStatus = "queued"
     error: Optional[str] = None
     page_count: int = 0
     title: Optional[str] = None
-    summary: Optional[str] = None  # short overview paragraph (legacy)
+    summary: Optional[str] = None  # built on demand via /summarize
     sections: Optional[dict] = None  # {abstract, objective, method, results, conclusion}
     model_used: Optional[str] = None  # which LLM produced the current summary
     persona_used: Optional[str] = None
-    quality: Optional[dict] = None  # {score, pages_with_text, total_pages, tables_count, figures_count, label}
+    summary_language: Optional[str] = None  # "id" or "en" — locked when first summary is built
+    quality: Optional[dict] = None
     uploaded_at: str = Field(default_factory=utcnow_iso)
+    queue_position: Optional[int] = None  # computed at read time, not persisted
 
 
 # ----- Settings -----

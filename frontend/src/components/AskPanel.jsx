@@ -1,15 +1,24 @@
 import { useState } from "react";
-import { Send, MessageSquareText, Loader2, FileSearch, Sparkles } from "lucide-react";
+import { Send, MessageSquareText, Loader2, FileSearch, Sparkles, Languages } from "lucide-react";
 import { api } from "@/services/api";
 import { toast } from "sonner";
 import EvidenceBadge from "@/components/EvidenceBadge";
 import { useT } from "@/lib/useT";
+import { getFeatureLanguage, setFeatureLanguage } from "@/lib/featureLanguage";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 
 export default function AskPanel({ projectId, docs }) {
   const { t } = useT();
   const [q, setQ] = useState("");
   const [busy, setBusy] = useState(false);
   const [history, setHistory] = useState([]); // [{q, answer, citations, overall_tier}]
+  const [language, setLanguage] = useState(() => getFeatureLanguage("ask", "id"));
   const ready = (docs || []).filter((d) => d.status === "ready");
 
   const ask = async () => {
@@ -19,8 +28,9 @@ export default function AskPanel({ projectId, docs }) {
       return;
     }
     setBusy(true);
+    setFeatureLanguage("ask", language);
     try {
-      const r = await api.ask(projectId, q.trim());
+      const r = await api.ask(projectId, q.trim(), language);
       setHistory((h) => [{ ...r }, ...h]);
       setQ("");
     } catch {
@@ -39,6 +49,25 @@ export default function AskPanel({ projectId, docs }) {
         <MessageSquareText className="w-3.5 h-3.5" /> {t("ask.title")}
       </div>
       <p className="text-sm text-[color:var(--jm-text-2)] font-ui mb-4">{t("ask.intro")}</p>
+
+      <div className="mb-3 flex items-center gap-2">
+        <Languages className="w-3.5 h-3.5 text-[color:var(--jm-text-3)]" />
+        <span className="text-[10px] uppercase tracking-[0.18em] font-semibold text-[color:var(--jm-text-3)]">
+          {t("ask.language")}
+        </span>
+        <Select value={language} onValueChange={setLanguage}>
+          <SelectTrigger
+            data-testid="ask-lang-select"
+            className="h-8 text-xs bg-[color:var(--jm-surface)] border-[color:var(--jm-border)] text-[color:var(--jm-text)] w-[144px]"
+          >
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem data-testid="ask-lang-id" value="id">Bahasa Indonesia</SelectItem>
+            <SelectItem data-testid="ask-lang-en" value="en">English</SelectItem>
+          </SelectContent>
+        </Select>
+      </div>
 
       <div className="flex gap-2">
         <input

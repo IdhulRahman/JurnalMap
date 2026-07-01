@@ -60,15 +60,17 @@ from app.models.user import (
     ForgotPasswordRequest,
     ChangePasswordRequest,
 )
-from app.services.document_processor import process_document, regenerate_summary
+from app.services.document_processor import process_document, process_document_parse_only, regenerate_summary
 from app.services.evidence_service import find_evidence
 from app.services.outlier_service import compute_outliers
+from app.services.network_service import compute_network
 from app.services.matrix_service import extract_row, fields_for
 from app.services.qa_service import answer_question
 from app.services.verification_service import check_text
 from app.services.llm import split_provider_model, emergent_key, default_model, LLMJSONError
 from app.services.auth_service import hash_password, verify_password, create_access_token, decode_token
 from app.services import cache as app_cache
+from app.services import queue as queue_worker
 
 
 UPLOAD_DIR = Path(os.environ.get("UPLOAD_DIR", str(ROOT_DIR / "uploads")))
@@ -399,26 +401,31 @@ async def delete_project(project_id: str, current_user: dict = Depends(get_curre
 async def list_documents(project_id: str, current_user: dict = Depends(get_current_user)):
     await _project_or_forbidden(project_id, current_user)
     rows = await db.documents.find({"project_id": project_id}, {"_id": 0}).sort("uploaded_at", -1).to_list(500)
+    # Attach transient queue_position for queued/processing docs
+    for r in rows:
+        pos = await queue_worker.compute_queue_position(db, r)
+        if pos is not None:
+            r["queue_position"] = pos
     return [DocumentMeta(**r) for r in rows]
 
 
 @api.post("/projects/{project_id}/documents", response_model=List[DocumentMeta])
 async def upload_documents(
     project_id: str,
-    background_tasks: BackgroundTasks,
     files: List[UploadFile] = File(...),
     current_user: dict = Depends(get_current_user),
 ):
-    """Upload up to 5 PDF files to a project. All are processed asynchronously."""
+    """Upload up to N PDF files. All are enqueued for background parsing.
+
+    Files are inserted with status='queued' and picked up FIFO by the single
+    queue worker (concurrency=1). No LLM call happens at upload time.
+    """
     await _project_or_forbidden(project_id, current_user)
 
     if len(files) > MAX_FILES_PER_UPLOAD:
         raise HTTPException(400, f"Maximum {MAX_FILES_PER_UPLOAD} files per upload")
 
     results: List[DocumentMeta] = []
-    settings = await _load_settings()
-    model_id = settings.get("default_model") or default_model()
-    provider, model_id = split_provider_model(model_id, settings)
 
     for file in files:
         if not file.filename or not file.filename.lower().endswith(".pdf"):
@@ -441,23 +448,58 @@ async def upload_documents(
                     raise HTTPException(413, f"File '{file.filename}' exceeds {MAX_UPLOAD_SIZE_MB} MB limit")
                 await out.write(chunk)
 
-        meta = DocumentMeta(id=doc_id, project_id=project_id, filename=file.filename, status="processing")
+        meta = DocumentMeta(id=doc_id, project_id=project_id, filename=file.filename, status="queued")
         await db.documents.insert_one(meta.model_dump())
-
-        background_tasks.add_task(
-            process_document,
-            db,
-            doc_id,
-            str(dest),
-            user_settings=settings,
-            provider=provider,
-            model=model_id,
-        )
         results.append(meta)
 
     # Invalidate outlier cache for this project since new docs are coming
     app_cache.invalidate_outlier(project_id)
     return results
+
+
+@api.post("/documents/{document_id}/retry", response_model=DocumentMeta)
+async def retry_document(document_id: str, current_user: dict = Depends(get_current_user)):
+    """Re-queue a failed (or stuck) document. Clears error and returns it to 'queued'."""
+    d = await _document_or_forbidden(document_id, current_user)
+    fp = UPLOAD_DIR / f"{document_id}.pdf"
+    if not fp.exists():
+        raise HTTPException(400, "Original file is missing, cannot retry. Please re-upload.")
+    if d.get("status") == "processing":
+        raise HTTPException(400, "Document is already processing")
+    # Reset for a fresh run
+    from app.models.schemas import utcnow_iso
+    await db.documents.update_one(
+        {"id": document_id},
+        {"$set": {
+            "status": "queued",
+            "error": None,
+            "uploaded_at": utcnow_iso(),
+        }},
+    )
+    updated = await db.documents.find_one({"id": document_id}, {"_id": 0})
+    return DocumentMeta(**updated)
+
+
+@api.get("/projects/{project_id}/queue")
+async def get_project_queue(project_id: str, current_user: dict = Depends(get_current_user)):
+    """Return queue status for a project's documents."""
+    await _project_or_forbidden(project_id, current_user)
+    docs = await db.documents.find(
+        {"project_id": project_id},
+        {"_id": 0, "id": 1, "filename": 1, "status": 1, "uploaded_at": 1, "error": 1},
+    ).sort("uploaded_at", 1).to_list(500)
+    items = []
+    for d in docs:
+        pos = await queue_worker.compute_queue_position(db, d)
+        items.append({
+            "id": d["id"],
+            "filename": d.get("filename"),
+            "status": d.get("status"),
+            "queue_position": pos,
+            "error": d.get("error"),
+        })
+    global_summary = await queue_worker.queue_summary(db)
+    return {"items": items, **global_summary}
 
 
 @api.get("/documents/{document_id}", response_model=DocumentMeta)
@@ -516,38 +558,39 @@ async def _load_settings() -> dict:
 
 
 def _models_for(settings: dict) -> list[dict]:
-    """Return the list of models the user can pick."""
-    models = []
+    """Return the list of models the user can pick. Admin-configured only.
+
+    - Cloud model exposed if EMERGENT_LLM_KEY is set (default: LLM_MODEL env var)
+    - Local LLM exposed if LOCAL_LLM_ENABLED is truthy in server env
+    """
+    models: list[dict] = []
     if emergent_key():
-        models += [
-            {"id": "gemini-3-flash-preview", "provider": "gemini", "label": "Gemini 3 Flash (Emergent)"},
-            {"id": "gemini-2.5-pro", "provider": "gemini", "label": "Gemini 2.5 Pro (Emergent)"},
-            {"id": "gpt-5.4-mini", "provider": "openai", "label": "GPT-5.4 Mini (Emergent)"},
-            {"id": "claude-haiku-4-5", "provider": "anthropic", "label": "Claude Haiku 4.5 (Emergent)"},
+        primary_id = os.environ.get("LLM_MODEL", "gemini-2.0-flash")
+        # Detect provider from model id for the label prefix.
+        prov, _ = split_provider_model(primary_id, None)
+        models.append({"id": primary_id, "provider": prov, "label": f"{primary_id} (administrator)"})
+        # Also expose a couple of common alternates from the emergent stack.
+        alternates = [
+            ("gemini-3-flash-preview", "gemini"),
+            ("gpt-5.4-mini", "openai"),
+            ("claude-haiku-4-5", "anthropic"),
         ]
-    if settings.get("gemini_key"):
-        models.append({"id": "gemini-3-flash-preview", "provider": "gemini", "label": "Gemini 3 Flash (Your key)"})
-        models.append({"id": "gemini-2.5-pro", "provider": "gemini", "label": "Gemini 2.5 Pro (Your key)"})
-    if settings.get("openai_key"):
-        models.append({"id": "gpt-4o-mini", "provider": "openai", "label": "GPT-4o Mini (Your key)"})
-        models.append({"id": "gpt-4o", "provider": "openai", "label": "GPT-4o (Your key)"})
-    if settings.get("anthropic_key"):
-        models.append({"id": "claude-sonnet-4-5", "provider": "anthropic", "label": "Claude Sonnet 4.5 (Your key)"})
-    if settings.get("local_endpoint") and settings.get("local_model"):
+        seen = {primary_id}
+        for mid, prov in alternates:
+            if mid in seen:
+                continue
+            seen.add(mid)
+            models.append({"id": mid, "provider": prov, "label": f"{mid} (administrator)"})
+
+    # Admin-provided local LLM (Ollama / vLLM / gemma etc.)
+    if os.environ.get("LOCAL_LLM_ENABLED", "false").lower() in ("1", "true", "yes"):
+        local_name = os.environ.get("LOCAL_LLM_NAME", "gemma-llm")
         models.append({
-            "id": settings["local_model"],
+            "id": local_name,
             "provider": "local",
-            "label": f"{settings['local_model']} (Local)",
+            "label": f"{local_name} (administrator)",
         })
-    seen = set()
-    out = []
-    for m in models:
-        key = (m["provider"], m["id"], m["label"])
-        if key in seen:
-            continue
-        seen.add(key)
-        out.append(m)
-    return out
+    return models
 
 
 def _mask(value: str | None) -> str:
@@ -647,11 +690,51 @@ async def get_status(document_id: str, current_user: dict = Depends(get_current_
     }
 
 
+def _apply_language(settings: dict, language: Optional[str]) -> dict:
+    """Return a shallow-copied settings dict with output_language overridden."""
+    if not language:
+        return settings
+    lang = language.strip().lower()
+    if lang not in ("id", "en"):
+        return settings
+    out = dict(settings or {})
+    out["output_language"] = lang
+    return out
+
+
+def _local_llm_env_settings() -> dict:
+    """Convert admin-configured local LLM env vars into settings dict overrides."""
+    enabled = os.environ.get("LOCAL_LLM_ENABLED", "false").lower() in ("1", "true", "yes")
+    if not enabled:
+        return {}
+    return {
+        "local_endpoint": os.environ.get("LOCAL_LLM_ENDPOINT", ""),
+        "local_model": os.environ.get("LOCAL_LLM_NAME", "gemma-llm"),
+        "local_api_key": os.environ.get("LOCAL_LLM_API_KEY", "ollama"),
+    }
+
+
 @api.post("/documents/{document_id}/summarize")
-async def resummarize(document_id: str, model: Optional[str] = None, payload: dict = Body(default={}), current_user: dict = Depends(get_current_user)):
-    """Regenerate summary with chosen model."""
-    await _document_or_forbidden(document_id, current_user)
+async def resummarize(
+    document_id: str,
+    model: Optional[str] = None,
+    language: Optional[str] = None,
+    payload: dict = Body(default={}),
+    current_user: dict = Depends(get_current_user),
+):
+    """Generate (or regenerate) the summary for a document.
+
+    Query params:
+      - model:    optional model id override (must be one of `available_models`)
+      - language: "id" or "en" — output language for this summary
+    """
+    d = await _document_or_forbidden(document_id, current_user)
+    if d.get("status") != "ready":
+        raise HTTPException(409, "Document is not ready yet (still queued/processing/failed)")
     settings = await _load_settings()
+    # Merge admin local-LLM env into settings so provider routing can pick it up
+    settings = {**settings, **_local_llm_env_settings()}
+    settings = _apply_language(settings, language)
     if isinstance(payload, dict) and payload.get("persona_id"):
         settings = {**settings, "persona_id": payload["persona_id"]}
         if "persona_custom" in payload:
@@ -671,6 +754,11 @@ async def resummarize(document_id: str, model: Optional[str] = None, payload: di
             status_code=502,
             detail=f"Model '{model_id}' returned malformed JSON. Please try another model. ({e})",
         )
+    # Persist chosen language on the document so Matriks etc. can reuse it
+    await db.documents.update_one(
+        {"id": document_id},
+        {"$set": {"summary_language": (settings.get("output_language") or "en")}},
+    )
     return await get_summary(document_id, current_user)
 
 
@@ -797,7 +885,13 @@ async def build_matrix(
 # ── Ask Library ───────────────────────────────────────────────────────────────
 
 @api.post("/projects/{project_id}/ask", response_model=AskResponse)
-async def ask_library(project_id: str, payload: AskRequest, model: Optional[str] = None, current_user: dict = Depends(get_current_user)):
+async def ask_library(
+    project_id: str,
+    payload: AskRequest,
+    model: Optional[str] = None,
+    language: Optional[str] = None,
+    current_user: dict = Depends(get_current_user),
+):
     await _project_or_forbidden(project_id, current_user)
     if not payload.question.strip():
         raise HTTPException(400, "question must not be empty")
@@ -807,6 +901,8 @@ async def ask_library(project_id: str, payload: AskRequest, model: Optional[str]
         sents = await db.sentences.find({"document_id": d["id"]}, {"_id": 0}).to_list(5000)
         inputs.append({"id": d["id"], "title": d.get("title") or d.get("filename"), "sentences": sents})
     settings = await _load_settings()
+    settings = {**settings, **_local_llm_env_settings()}
+    settings = _apply_language(settings, language)
     model_id = model or settings.get("default_model") or default_model()
     provider, model_id = split_provider_model(model_id, settings)
     res = await answer_question(
@@ -821,6 +917,44 @@ async def ask_library(project_id: str, payload: AskRequest, model: Optional[str]
         model_used=res.get("model_used") or model_id,
         persona_used=res.get("persona_used") or settings.get("persona_id"),
     )
+
+
+# ── Network Graph ─────────────────────────────────────────────────────────────
+
+@api.get("/projects/{project_id}/network")
+async def project_network(project_id: str, current_user: dict = Depends(get_current_user)):
+    """Composite-similarity network graph for the project's ready documents.
+
+    Composite = 0.5 * semantic + 0.3 * keyword_jaccard + 0.2 * topic_match.
+    Semantic uses sentence-transformers when available, TF cosine fallback otherwise.
+    """
+    await _project_or_forbidden(project_id, current_user)
+    docs = await db.documents.find(
+        {"project_id": project_id, "status": "ready"}, {"_id": 0},
+    ).to_list(500)
+    payload = []
+    for d in docs:
+        sents = await db.sentences.find({"document_id": d["id"]}, {"_id": 0}).to_list(5000)
+        payload.append({"id": d["id"], "title": d.get("title") or d.get("filename"), "sentences": sents})
+    res = compute_network(payload)
+    return res
+
+
+# ── Config (public models the admin exposes) ─────────────────────────────────
+
+@api.get("/config")
+async def app_config():
+    """Public server config: available models, embedding backend, upload limits."""
+    settings = await _load_settings()
+    return {
+        "available_models": _models_for(settings),
+        "default_model": os.environ.get("LLM_MODEL", "gemini-2.0-flash"),
+        "embedding_model": os.environ.get("EMBEDDING_MODEL", "paraphrase-multilingual-MiniLM-L12-v2"),
+        "embedding_enabled": os.environ.get("EMBEDDING_ENABLED", "true").lower() in ("1", "true", "yes"),
+        "local_llm_enabled": os.environ.get("LOCAL_LLM_ENABLED", "false").lower() in ("1", "true", "yes"),
+        "max_files_per_upload": MAX_FILES_PER_UPLOAD,
+        "max_upload_size_mb": MAX_UPLOAD_SIZE_MB,
+    }
 
 
 # ── Check & Fix ───────────────────────────────────────────────────────────────
@@ -1027,10 +1161,23 @@ async def seed_admin():
     await db.projects.create_index("owner_id")
     await db.documents.create_index([("project_id", 1), ("uploaded_at", -1)])
     await db.documents.create_index([("project_id", 1), ("status", 1)])
+    await db.documents.create_index([("status", 1), ("uploaded_at", 1)])
     await db.sentences.create_index([("document_id", 1), ("idx", 1)])
     await db.claims.create_index([("document_id", 1), ("idx", 1)])
+
+    # Reset any "processing" docs that were interrupted by a restart
+    reset = await db.documents.update_many(
+        {"status": "processing"},
+        {"$set": {"status": "queued"}},
+    )
+    if reset.modified_count:
+        logger.info("Reset %d in-flight documents to 'queued' on startup", reset.modified_count)
+
+    # Start the single-worker PDF processing queue
+    queue_worker.start_worker(db, UPLOAD_DIR)
 
 
 @app.on_event("shutdown")
 async def shutdown():
+    await queue_worker.stop_worker()
     client.close()

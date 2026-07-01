@@ -1,23 +1,34 @@
 import { Link, useLocation, useNavigate } from "react-router-dom";
-import { Layers, Library, Settings as SettingsIcon, LogOut, UserCircle2 } from "lucide-react";
+import { Layers, Library, Settings as SettingsIcon, LogOut, UserCircle2, Sun, Moon, Monitor } from "lucide-react";
 import { toast } from "sonner";
 import { useSettings } from "@/store/settings";
 import { useAuth } from "@/store/auth";
 import { useT } from "@/lib/useT";
 
+const NEXT_THEME = { light: "dark", dark: "system", system: "light" };
+const THEME_ICON = { light: Sun, dark: Moon, system: Monitor };
+const THEME_LABEL = { light: "Terang", dark: "Gelap", system: "Sistem" };
+
 export default function Header({ rightSlot = null }) {
   const loc = useLocation();
   const nav = useNavigate();
   const onProject = loc.pathname.startsWith("/project");
-  const { settings } = useSettings();
+  const { settings, setTheme } = useSettings();
   const { user, logout } = useAuth();
   const { t } = useT();
-  const _theme = settings?.theme || "light";
+  const theme = settings?.theme || "system";
+  const ThemeIcon = THEME_ICON[theme] || Sun;
 
   const onLogout = () => {
     logout();
     toast.success("Anda telah keluar");
     nav("/login", { replace: true });
+  };
+
+  const cycleTheme = () => {
+    const next = NEXT_THEME[theme] || "light";
+    setTheme(next);
+    toast.success(`Tema: ${THEME_LABEL[next]}`);
   };
 
   return (
@@ -66,6 +77,14 @@ export default function Header({ rightSlot = null }) {
               )}
             </div>
           )}
+          <button
+            onClick={cycleTheme}
+            data-testid="header-theme-toggle"
+            title={`Tema: ${THEME_LABEL[theme]}`}
+            className="w-9 h-9 rounded-md flex items-center justify-center border border-[color:var(--jm-border)] text-[color:var(--jm-text-2)] hover:bg-[color:var(--jm-sidebar)] hover:text-[color:var(--jm-text)] transition-colors"
+          >
+            <ThemeIcon className="w-4 h-4" />
+          </button>
           <Link
             to="/settings"
             data-testid="header-settings-link"

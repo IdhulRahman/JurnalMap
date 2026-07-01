@@ -2,6 +2,16 @@
 
 Platform analisis jurnal ilmiah berbasis AI. Upload PDF jurnal ilmiah, lalu sistem akan merangkum, mengekstrak klaim, mencari evidence, membangun comparison matrix, menjawab pertanyaan, dan memverifikasi teks AI — semuanya menggunakan berbagai LLM (Gemini, OpenAI, Anthropic, atau model lokal via Ollama).
 
+**Fitur utama (versi ini):**
+
+- 📄 Upload multi-PDF dengan **antrean pemrosesan satu-per-satu** (menampilkan status *Menunggu (2/5)…* dan *Memproses (1/5)…*).
+- 🔁 Tombol **Proses Kembali** untuk file yang gagal.
+- 🧠 **Ringkasan on-demand** — teks diekstrak otomatis, tetapi LLM baru dipanggil saat pengguna menekan tombol *Ringkas*.
+- 🌐 **Peta Penelitian (Network Graph)** — otomatis terbentuk di Tab Baca ketika ≥ 2 jurnal siap. Composite score = `0.5·semantic + 0.3·keyword + 0.2·topic`.
+- 🌗 **Tema Terang / Gelap / Sistem** (di navbar & Settings).
+- 🌍 **Pemilihan bahasa keluaran per fitur** (Ringkasan, Tanya Pustaka).
+- ⚙️ Model AI **hanya disediakan oleh administrator** (via env). Pengguna tidak lagi menginput API key.
+
 ---
 
 ## 🏗️ Arsitektur
@@ -10,15 +20,49 @@ Platform analisis jurnal ilmiah berbasis AI. Upload PDF jurnal ilmiah, lalu sist
 Browser (React 19) ──HTTP──▶ FastAPI (Uvicorn) ──Motor──▶ MongoDB
                                    │
                               app/services/
-                              ├── pdf_parser.py    (PyMuPDF)
-                              ├── llm.py           (Emergent/OpenAI/Anthropic/Local)
+                              ├── pdf_parser.py            (PyMuPDF)
+                              ├── document_processor.py   (parse-only)
+                              ├── queue.py                (single-worker FIFO)
+                              ├── network_service.py      (composite similarity)
+                              ├── llm.py                  (Emergent / OpenAI / Anthropic / Local)
                               ├── summary_service.py
                               ├── evidence_service.py
-                              ├── outlier_service.py
                               ├── matrix_service.py
                               ├── qa_service.py
                               └── verification_service.py
 ```
+
+---
+
+## 🚀 Menjalankan dengan Docker
+
+```bash
+# 1. Clone repository
+git clone <repo-url> jurnalmap && cd jurnalmap
+
+# 2. Copy template environment file
+cp .env.example .env
+#    Edit .env: set EMERGENT_LLM_KEY atau vendor key, JWT_SECRET_KEY, dsb.
+
+# 3. Build & jalankan (menggunakan MongoDB, backend, frontend)
+docker-compose up -d --build
+
+# 4. Buka aplikasi
+open http://localhost:3000
+
+# 5. (Opsional) Aktifkan Ollama untuk local LLM
+docker-compose --profile ollama up -d
+docker exec -it jurnalmap-ollama ollama pull gemma:2b
+#    Lalu di .env set: LOCAL_LLM_ENABLED=true, LOCAL_LLM_NAME=gemma:2b
+docker-compose restart backend
+```
+
+Model embedding untuk Network Graph diatur di `.env`:
+```
+EMBEDDING_ENABLED=true
+EMBEDDING_MODEL=paraphrase-multilingual-MiniLM-L12-v2   # atau BAAI/bge-m3
+```
+
 
 ---
 

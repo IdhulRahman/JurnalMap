@@ -9,11 +9,13 @@ import {
   RefreshCw,
   Cpu,
   Sparkles,
+  Languages,
 } from "lucide-react";
 import EvidenceBadge from "@/components/EvidenceBadge";
 import { CATEGORY_LABEL, TIER_META } from "@/lib/tiers";
 import { useSettings } from "@/store/settings";
 import { useT } from "@/lib/useT";
+import { getFeatureLanguage, setFeatureLanguage } from "@/lib/featureLanguage";
 import {
   Select,
   SelectContent,
@@ -40,6 +42,7 @@ export default function SummaryPanel({ docId, projectId, summary, claims, sectio
   const [busyKey, setBusyKey] = useState(null);
   const [evidenceByKey, setEvidenceByKey] = useState({});
   const [selectedModel, setSelectedModel] = useState(modelUsed || settings?.default_model || "");
+  const [selectedLanguage, setSelectedLanguage] = useState(() => getFeatureLanguage("summary", "id"));
   const [resummarizing, setResummarizing] = useState(false);
 
   useEffect(() => {
@@ -101,8 +104,9 @@ export default function SummaryPanel({ docId, projectId, summary, claims, sectio
 
   const resummarize = async () => {
     setResummarizing(true);
+    setFeatureLanguage("summary", selectedLanguage);
     try {
-      const r = await api.resummarize(docId, selectedModel);
+      const r = await api.resummarize(docId, selectedModel, null, selectedLanguage);
       setEvidenceByKey({}); // claim ids changed
       setActiveKey(null);
       onHighlight([], null);
@@ -112,6 +116,8 @@ export default function SummaryPanel({ docId, projectId, summary, claims, sectio
       const msg = e?.response?.data?.detail;
       if (e?.response?.status === 502 && msg) {
         toast.error(msg, { duration: 6000 });
+      } else if (e?.response?.status === 409) {
+        toast.error("Dokumen belum siap.");
       } else {
         toast.error("Gagal meringkas ulang");
       }
@@ -121,23 +127,16 @@ export default function SummaryPanel({ docId, projectId, summary, claims, sectio
   };
 
   const hasSections = sections && SECTION_ORDER.some((k) => (sections[k] || "").trim());
-
-  if (!summary && !hasSections && (!claims || claims.length === 0)) {
-    return (
-      <div className="p-6 text-sm text-[color:var(--jm-text-3)] font-ui">
-        Belum ada ringkasan untuk jurnal ini.
-      </div>
-    );
-  }
+  const isEmpty = !summary && !hasSections && (!claims || claims.length === 0);
 
   return (
     <div className="p-6 space-y-6">
-      {/* Model picker + Ringkas Ulang */}
+      {/* Model picker + Language + Ringkas */}
       <section
         data-testid="summary-model-bar"
         className="pb-4 border-b border-[color:var(--jm-border)] space-y-2"
       >
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-2 flex-wrap">
           <Cpu className="w-3.5 h-3.5 text-[color:var(--jm-text-3)]" />
           <span className="text-[10px] uppercase tracking-[0.22em] font-semibold text-[color:var(--jm-text-3)]">
             {t("summary.modelBar")}
@@ -145,7 +144,7 @@ export default function SummaryPanel({ docId, projectId, summary, claims, sectio
           <Select value={selectedModel} onValueChange={setSelectedModel}>
             <SelectTrigger
               data-testid="summary-model-select"
-              className="h-8 text-xs bg-[color:var(--jm-surface)] border-[color:var(--jm-border)] text-[color:var(--jm-text)] flex-1 min-w-0"
+              className="h-8 text-xs bg-[color:var(--jm-surface)] border-[color:var(--jm-border)] text-[color:var(--jm-text)] flex-1 min-w-[140px]"
             >
               <SelectValue />
             </SelectTrigger>
@@ -161,15 +160,30 @@ export default function SummaryPanel({ docId, projectId, summary, claims, sectio
               ))}
             </SelectContent>
           </Select>
+
+          <Languages className="w-3.5 h-3.5 text-[color:var(--jm-text-3)] ml-1" />
+          <Select value={selectedLanguage} onValueChange={setSelectedLanguage}>
+            <SelectTrigger
+              data-testid="summary-lang-select"
+              className="h-8 text-xs bg-[color:var(--jm-surface)] border-[color:var(--jm-border)] text-[color:var(--jm-text)] w-[128px]"
+            >
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem data-testid="summary-lang-id" value="id">Bahasa Indonesia</SelectItem>
+              <SelectItem data-testid="summary-lang-en" value="en">English</SelectItem>
+            </SelectContent>
+          </Select>
+
           <button
             data-testid="resummarize-btn"
             onClick={resummarize}
             disabled={resummarizing}
             className="px-3 py-1.5 rounded-md text-xs font-semibold font-ui flex items-center gap-1.5 bg-[color:var(--jm-text)] text-[color:var(--jm-bg)] hover:opacity-90 disabled:opacity-50"
-            title="Ringkas ulang dengan model ini"
+            title="Ringkas dokumen dengan model & bahasa ini"
           >
             {resummarizing ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <RefreshCw className="w-3.5 h-3.5" />}
-            {t("summary.resummarize")}
+            {isEmpty ? "Ringkas" : t("summary.resummarize")}
           </button>
         </div>
         {(modelUsed || personaUsed) && (
@@ -199,6 +213,20 @@ export default function SummaryPanel({ docId, projectId, summary, claims, sectio
         )}
       </section>
 
+      {isEmpty && (
+        <section
+          data-testid="summary-placeholder"
+          className="rounded-lg border border-dashed border-[color:var(--jm-border)] bg-[color:var(--jm-surface)] p-8 text-center"
+        >
+          <BookOpenCheck className="w-8 h-8 mx-auto text-[color:var(--jm-text-3)] mb-3" />
+          <p className="font-reading text-[15px] leading-relaxed text-[color:var(--jm-text-2)]">
+            {t("summary.placeholder")}
+          </p>
+        </section>
+      )}
+
+      {!isEmpty && (
+      <>
       {/* Overview */}
       <section>
         <div className="flex items-center gap-2 text-[10px] uppercase tracking-[0.22em] font-semibold text-[color:var(--jm-text-3)] mb-3">
@@ -361,6 +389,8 @@ export default function SummaryPanel({ docId, projectId, summary, claims, sectio
           ))}
         </div>
       </section>
+      </>
+      )}
 
       {projectId && null}
     </div>

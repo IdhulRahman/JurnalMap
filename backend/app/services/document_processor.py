@@ -12,20 +12,22 @@ from .summary_service import summarise_document
 logger = logging.getLogger(__name__)
 
 
-async def process_document(
+async def process_document_parse_only(
     db,
     document_id: str,
     pdf_path: str,
-    *,
-    user_settings: Optional[Dict[str, Any]] = None,
-    provider: Optional[str] = None,
-    model: Optional[str] = None,
 ) -> None:
-    """Background task: parse PDF -> insert sentences -> generate summary+claims."""
+    """Queue worker task: parse PDF -> insert sentences. NO summary/claims.
+
+    Status transitions:  processing -> ready (or failed).
+    Summary is built on demand via /documents/{id}/summarize.
+    """
     try:
         parsed = parse_pdf(pdf_path)
         sentences = parsed["sentences"]
 
+        # Clear any previous sentences in case of a retry
+        await db.sentences.delete_many({"document_id": document_id})
         sentence_docs = []
         for i, s in enumerate(sentences):
             sentence_docs.append({
@@ -39,46 +41,62 @@ async def process_document(
             await db.sentences.insert_many(sentence_docs)
 
         title = parsed.get("title") or ""
-        summary_data = await summarise_document(
-            document_id,
-            title,
-            sentences,
-            user_settings=user_settings,
-            provider=provider,
-            model=model,
-        )
-
-        claim_docs = []
-        for c in summary_data.get("claims", []):
-            claim_docs.append({
-                "id": str(_uuid.uuid4()),
-                "document_id": document_id,
-                "idx": c.get("idx", 0),
-                "text": c.get("text", ""),
-                "category": c.get("category", "finding"),
-            })
-        if claim_docs:
-            await db.claims.insert_many(claim_docs)
-
         update_set = {
             "status": "ready",
             "page_count": parsed.get("page_count", 0),
-            "title": title or None,
-            "summary": summary_data.get("summary", ""),
-            "sections": summary_data.get("sections", {}),
-            "model_used": model,
-            "persona_used": (user_settings or {}).get("persona_id"),
             "quality": parsed.get("quality") or {},
+            # Clear any previous error / stale summary from a prior run
+            "error": None,
+            "summary": None,
+            "sections": None,
+            "model_used": None,
+            "persona_used": None,
+            "summary_language": None,
         }
+        if title:
+            update_set["title"] = title
+        # Remove old claims (if this was a retry after a summary was built)
+        await db.claims.delete_many({"document_id": document_id})
+
         await db.documents.update_one({"id": document_id}, {"$set": update_set})
-        logger.info("Document %s processed: %d sentences, %d claims",
-                    document_id, len(sentence_docs), len(claim_docs))
+        logger.info(
+            "Document %s parsed: %d sentences (title=%s)",
+            document_id, len(sentence_docs), title[:60] if title else "-",
+        )
     except Exception as e:
-        logger.error("Failed to process %s: %s\n%s", document_id, e, traceback.format_exc())
+        logger.error("Failed to parse %s: %s\n%s", document_id, e, traceback.format_exc())
         await db.documents.update_one(
             {"id": document_id},
             {"$set": {"status": "failed", "error": str(e)[:300]}},
         )
+
+
+async def process_document(
+    db,
+    document_id: str,
+    pdf_path: str,
+    *,
+    user_settings: Optional[Dict[str, Any]] = None,
+    provider: Optional[str] = None,
+    model: Optional[str] = None,
+) -> None:
+    """Legacy full pipeline: parse + summarise. Kept for compatibility with
+    tests / callers that expect the previous behavior. Prefer
+    `process_document_parse_only` + on-demand `regenerate_summary`.
+    """
+    await process_document_parse_only(db, document_id, pdf_path)
+    doc = await db.documents.find_one({"id": document_id}, {"_id": 0})
+    if doc and doc.get("status") == "ready":
+        try:
+            await regenerate_summary(
+                db,
+                document_id,
+                user_settings=user_settings,
+                provider=provider,
+                model=model,
+            )
+        except Exception as e:  # noqa: BLE001
+            logger.warning("Auto-summary failed for %s: %s", document_id, e)
 
 
 async def regenerate_summary(

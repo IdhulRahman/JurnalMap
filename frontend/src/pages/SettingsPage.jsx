@@ -4,22 +4,18 @@ import {
   ArrowLeft,
   Moon,
   Sun,
-  Key,
+  Monitor,
   UserCircle2,
   Loader2,
   Save,
   Languages,
-  ServerCog,
-  Globe,
 } from "lucide-react";
 import { toast } from "sonner";
 import { useSettings } from "@/store/settings";
 import { useT } from "@/lib/useT";
-import { api } from "@/services/api";
 import Header from "@/components/Header";
 import ChangePasswordCard from "@/components/ChangePasswordCard";
 import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import {
   Select,
@@ -29,9 +25,20 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 
+/**
+ * Simplified Settings:
+ *   - Appearance (Light / Dark / System)
+ *   - UI Language (id / en)
+ *   - AI Persona (uses server-side default; still editable)
+ *   - Change password
+ *
+ * All LLM key / provider / model inputs are removed — models are supplied by
+ * the administrator via environment variables. Per-feature output language is
+ * chosen in each feature's own panel (Ringkas, Tanya), not here.
+ */
 export default function SettingsPage() {
   const nav = useNavigate();
-  const { settings, setTheme, update, reload } = useSettings();
+  const { settings, setTheme, setUiLanguage, update, reload } = useSettings();
   const { t } = useT();
   const [local, setLocal] = useState(null);
   const [saving, setSaving] = useState(false);
@@ -39,18 +46,10 @@ export default function SettingsPage() {
   useEffect(() => {
     if (settings) {
       setLocal({
-        theme: settings.theme || "light",
+        theme: settings.theme || "system",
+        ui_language: settings.ui_language || "id",
         persona_id: settings.persona_id || "akademisi_ketat",
         persona_custom: settings.persona_custom || "",
-        output_language: settings.output_language || "en",
-        ui_language: settings.ui_language || "id",
-        default_model: settings.default_model,
-        local_endpoint: settings.local_endpoint || "",
-        local_model: settings.local_model || "",
-        gemini_key: "",
-        openai_key: "",
-        anthropic_key: "",
-        local_api_key: "",
       });
     }
   }, [settings]);
@@ -64,58 +63,19 @@ export default function SettingsPage() {
     );
   }
 
-  const save = async (patch) => {
+  const savePersona = async () => {
     setSaving(true);
     try {
-      await update(patch);
+      await update({
+        persona_id: local.persona_id,
+        persona_custom: local.persona_custom,
+      });
       toast.success(t("settings.saved"));
       await reload();
     } catch {
       toast.error("Save failed");
     } finally {
       setSaving(false);
-    }
-  };
-
-  const saveAll = async () => {
-    const patch = {
-      theme: local.theme,
-      persona_id: local.persona_id,
-      persona_custom: local.persona_custom,
-      output_language: local.output_language,
-      ui_language: local.ui_language,
-      default_model: local.default_model,
-      local_endpoint: local.local_endpoint,
-      local_model: local.local_model,
-    };
-    if (local.gemini_key) patch.gemini_key = local.gemini_key;
-    if (local.openai_key) patch.openai_key = local.openai_key;
-    if (local.anthropic_key) patch.anthropic_key = local.anthropic_key;
-    if (local.local_api_key) patch.local_api_key = local.local_api_key;
-    // Apply theme to DOM immediately (UI feedback) but server save happens via update()
-    if (local.theme && local.theme !== settings.theme) setTheme(local.theme);
-    await save(patch);
-    setLocal((s) => ({ ...s, gemini_key: "", openai_key: "", anthropic_key: "", local_api_key: "" }));
-  };
-
-  const clearKey = async (which) => save({ [which]: "" });
-
-  const testKey = async (provider, key) => {
-    const apiKey = (key || "").trim();
-    if (!apiKey) {
-      toast.error("Masukkan API key terlebih dahulu");
-      return;
-    }
-    const id = toast.loading(`Menguji koneksi ${provider}...`);
-    try {
-      const res = await api.testApiKey({ provider, api_key: apiKey });
-      if (res.ok) {
-        toast.success(`✅ Koneksi berhasil (${res.model})`, { id });
-      } else {
-        toast.error(`❌ Gagal: ${res.error || "unknown"}`, { id, duration: 8000 });
-      }
-    } catch (e) {
-      toast.error(`❌ Gagal: ${e?.response?.data?.detail || e?.message}`, { id, duration: 8000 });
     }
   };
 
@@ -140,26 +100,44 @@ export default function SettingsPage() {
         <p className="text-sm text-[color:var(--jm-text-2)] font-ui mb-10">{t("settings.sub")}</p>
 
         {/* Theme */}
-        <Section testId="settings-theme-section" icon={local.theme === "dark" ? Moon : Sun} title={t("settings.theme")}>
-          <div className="flex items-center gap-2">
+        <Section
+          testId="settings-theme-section"
+          icon={local.theme === "dark" ? Moon : local.theme === "system" ? Monitor : Sun}
+          title={t("settings.theme")}
+          hint={t("settings.theme.sub")}
+        >
+          <div className="flex items-center gap-2 flex-wrap">
             <Pill
               testId="theme-light-btn"
               active={local.theme === "light"}
               icon={Sun}
               label={t("settings.theme.light")}
-              onClick={() => setLocal((s) => ({ ...s, theme: "light" }))}
+              onClick={() => {
+                setLocal((s) => ({ ...s, theme: "light" }));
+                setTheme("light");
+              }}
             />
             <Pill
               testId="theme-dark-btn"
               active={local.theme === "dark"}
               icon={Moon}
               label={t("settings.theme.dark")}
-              onClick={() => setLocal((s) => ({ ...s, theme: "dark" }))}
+              onClick={() => {
+                setLocal((s) => ({ ...s, theme: "dark" }));
+                setTheme("dark");
+              }}
+            />
+            <Pill
+              testId="theme-system-btn"
+              active={local.theme === "system"}
+              icon={Monitor}
+              label={t("settings.theme.system")}
+              onClick={() => {
+                setLocal((s) => ({ ...s, theme: "system" }));
+                setTheme("system");
+              }}
             />
           </div>
-          <p className="mt-2 text-[10px] uppercase tracking-[0.16em] font-semibold font-ui text-[color:var(--jm-text-3)]">
-            Tekan tombol Simpan di bawah untuk menerapkan perubahan.
-          </p>
         </Section>
 
         {/* UI language */}
@@ -169,72 +147,20 @@ export default function SettingsPage() {
               testId="uilang-id-btn"
               active={local.ui_language === "id"}
               label="Bahasa Indonesia"
-              onClick={() => setLocal((s) => ({ ...s, ui_language: "id" }))}
+              onClick={() => {
+                setLocal((s) => ({ ...s, ui_language: "id" }));
+                setUiLanguage("id");
+              }}
             />
             <Pill
               testId="uilang-en-btn"
               active={local.ui_language === "en"}
               label="English"
-              onClick={() => setLocal((s) => ({ ...s, ui_language: "en" }))}
+              onClick={() => {
+                setLocal((s) => ({ ...s, ui_language: "en" }));
+                setUiLanguage("en");
+              }}
             />
-          </div>
-        </Section>
-
-        {/* Output language */}
-        <Section testId="settings-outlang-section" icon={Globe} title={t("settings.outLang")} hint={t("settings.outLang.hint")}>
-          <div className="flex items-center gap-2">
-            <Pill
-              testId="outlang-en-btn"
-              active={local.output_language === "en"}
-              label="English"
-              onClick={() => setLocal((s) => ({ ...s, output_language: "en" }))}
-            />
-            <Pill
-              testId="outlang-id-btn"
-              active={local.output_language === "id"}
-              label="Bahasa Indonesia"
-              onClick={() => setLocal((s) => ({ ...s, output_language: "id" }))}
-            />
-          </div>
-        </Section>
-
-        {/* API Keys */}
-        <Section testId="settings-keys-section" icon={Key} title={t("settings.keys")} hint={t("settings.keys.hint")}>
-          <KeyField label="Gemini API Key" testId="gemini-key" placeholder={settings.gemini_key_masked || "AIza..."}
-                    value={local.gemini_key} onChange={(v) => setLocal((s) => ({ ...s, gemini_key: v }))}
-                    hasKey={settings.has_gemini_key} onClear={() => clearKey("gemini_key")}
-                    onTest={() => testKey("gemini", local.gemini_key)} />
-          <KeyField label="OpenAI API Key" testId="openai-key" placeholder={settings.openai_key_masked || "sk-..."}
-                    value={local.openai_key} onChange={(v) => setLocal((s) => ({ ...s, openai_key: v }))}
-                    hasKey={settings.has_openai_key} onClear={() => clearKey("openai_key")}
-                    onTest={() => testKey("openai", local.openai_key)} />
-          <KeyField label="Anthropic API Key" testId="anthropic-key" placeholder={settings.anthropic_key_masked || "sk-ant-..."}
-                    value={local.anthropic_key} onChange={(v) => setLocal((s) => ({ ...s, anthropic_key: v }))}
-                    hasKey={settings.has_anthropic_key} onClear={() => clearKey("anthropic_key")}
-                    onTest={() => testKey("anthropic", local.anthropic_key)} last />
-        </Section>
-
-        {/* Local model */}
-        <Section testId="settings-local-section" icon={ServerCog} title={t("settings.local")} hint={t("settings.local.hint")}>
-          <div className="space-y-3">
-            <Labeled label={t("settings.local.endpoint")}>
-              <Input data-testid="local-endpoint-input" value={local.local_endpoint}
-                     onChange={(e) => setLocal((s) => ({ ...s, local_endpoint: e.target.value }))}
-                     placeholder="http://localhost:11434/v1"
-                     className="bg-[color:var(--jm-surface)] border-[color:var(--jm-border)] text-[color:var(--jm-text)]" />
-            </Labeled>
-            <Labeled label={t("settings.local.model")}>
-              <Input data-testid="local-model-input" value={local.local_model}
-                     onChange={(e) => setLocal((s) => ({ ...s, local_model: e.target.value }))}
-                     placeholder="llama3.1:8b"
-                     className="bg-[color:var(--jm-surface)] border-[color:var(--jm-border)] text-[color:var(--jm-text)]" />
-            </Labeled>
-            <Labeled label={t("settings.local.key")}>
-              <Input data-testid="local-api-key-input" type="password" autoComplete="off" value={local.local_api_key}
-                     onChange={(e) => setLocal((s) => ({ ...s, local_api_key: e.target.value }))}
-                     placeholder="ollama"
-                     className="bg-[color:var(--jm-surface)] border-[color:var(--jm-border)] text-[color:var(--jm-text)]" />
-            </Labeled>
           </div>
         </Section>
 
@@ -246,7 +172,7 @@ export default function SettingsPage() {
               <SelectValue placeholder="Pilih persona" />
             </SelectTrigger>
             <SelectContent>
-              {settings.personas.map((p) => (
+              {settings.personas?.map((p) => (
                 <SelectItem key={p.id} data-testid={`persona-option-${p.id}`} value={p.id}>{p.label}</SelectItem>
               ))}
             </SelectContent>
@@ -262,32 +188,34 @@ export default function SettingsPage() {
                         className="mt-1 bg-[color:var(--jm-surface)] border-[color:var(--jm-border)] text-[color:var(--jm-text)]" />
             </div>
           )}
+          <div className="mt-3 flex justify-end">
+            <Button data-testid="settings-save-btn" onClick={savePersona} disabled={saving}
+                    className="bg-[color:var(--jm-text)] text-[color:var(--jm-bg)] hover:opacity-90 gap-2">
+              {saving ? <Loader2 className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />}
+              {t("settings.save")}
+            </Button>
+          </div>
         </Section>
 
-        {/* Default model */}
-        <Section testId="settings-model-section" title={t("settings.model")} hint={t("settings.model.hint")}>
-          <Select value={local.default_model} onValueChange={(v) => setLocal((s) => ({ ...s, default_model: v }))}>
-            <SelectTrigger data-testid="default-model-select"
-                           className="bg-[color:var(--jm-surface)] border-[color:var(--jm-border)] text-[color:var(--jm-text)]">
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              {settings.available_models.map((m) => (
-                <SelectItem key={`${m.provider}-${m.id}-${m.label}`} data-testid={`model-option-${m.id}`} value={m.id}>
-                  {m.label}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
+        {/* Admin-provided models info (read-only) */}
+        <Section testId="settings-model-info-section" title={t("settings.model")} hint="Disediakan oleh administrator.">
+          <ul data-testid="admin-model-list" className="space-y-1.5">
+            {(settings.available_models || []).map((m) => (
+              <li key={`${m.provider}-${m.id}`} className="text-sm font-ui text-[color:var(--jm-text-2)] flex items-center gap-2">
+                <span className="w-1.5 h-1.5 rounded-full bg-[color:var(--jm-accent)]" />
+                <span className="font-mono">{m.id}</span>
+                <span className="text-[10px] uppercase tracking-[0.18em] text-[color:var(--jm-text-3)]">
+                  {m.provider}
+                </span>
+              </li>
+            ))}
+            {(!settings.available_models || settings.available_models.length === 0) && (
+              <li className="text-sm text-[color:var(--jm-text-3)] font-ui">
+                Tidak ada model yang dikonfigurasi.
+              </li>
+            )}
+          </ul>
         </Section>
-
-        <div className="flex justify-end">
-          <Button data-testid="settings-save-btn" onClick={saveAll} disabled={saving}
-                  className="bg-[color:var(--jm-text)] text-[color:var(--jm-bg)] hover:opacity-90 gap-2">
-            {saving ? <Loader2 className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />}
-            {t("settings.save")}
-          </Button>
-        </div>
 
         {/* Security: Change Password */}
         <div className="mt-10">
@@ -328,59 +256,5 @@ function Pill({ testId, active, icon: Icon, label, onClick }) {
       {Icon ? <Icon className="w-4 h-4" /> : null}
       {label}
     </button>
-  );
-}
-
-function Labeled({ label, children }) {
-  return (
-    <div>
-      <label className="text-[11px] uppercase tracking-[0.18em] font-semibold text-[color:var(--jm-text-3)]">
-        {label}
-      </label>
-      <div className="mt-1">{children}</div>
-    </div>
-  );
-}
-
-function KeyField({ label, testId, placeholder, value, onChange, hasKey, onClear, onTest, last = false }) {
-  return (
-    <div className={last ? "" : "mb-4"}>
-      <div className="flex items-center justify-between mb-1">
-        <label className="text-[11px] uppercase tracking-[0.18em] font-semibold text-[color:var(--jm-text-3)]">
-          {label}
-        </label>
-        {hasKey && (
-          <button
-            data-testid={`${testId}-clear-btn`}
-            onClick={onClear}
-            className="text-[10px] uppercase tracking-[0.18em] font-semibold text-[color:var(--jm-low-fg)] hover:underline"
-          >
-            Hapus / Clear
-          </button>
-        )}
-      </div>
-      <div className="flex items-center gap-2">
-        <Input
-          data-testid={`${testId}-input`}
-          type="password"
-          autoComplete="off"
-          value={value}
-          onChange={(e) => onChange(e.target.value)}
-          placeholder={placeholder}
-          className="bg-[color:var(--jm-surface)] border-[color:var(--jm-border)] text-[color:var(--jm-text)] flex-1"
-        />
-        {onTest && (
-          <button
-            data-testid={`${testId}-test-btn`}
-            onClick={onTest}
-            disabled={!value}
-            className="px-3 py-2 rounded-md text-xs font-ui font-semibold border border-[color:var(--jm-border)] text-[color:var(--jm-text-2)] hover:bg-[color:var(--jm-sidebar)] disabled:opacity-50 whitespace-nowrap"
-            title="Tes koneksi dengan API key ini"
-          >
-            Tes Koneksi
-          </button>
-        )}
-      </div>
-    </div>
   );
 }
