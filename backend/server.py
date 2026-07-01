@@ -19,7 +19,6 @@ import aiofiles
 from fastapi import (
     FastAPI,
     APIRouter,
-    BackgroundTasks,
     UploadFile,
     File,
     HTTPException,
@@ -38,7 +37,6 @@ from app.models.schemas import (
     DocumentMeta,
     EvidenceResponse,
     EvidenceItem,
-    OutlierResponse,
     MatrixResponse,
     MatrixRow,
     MatrixCell,
@@ -62,12 +60,12 @@ from app.models.user import (
 )
 from app.services.document_processor import process_document, process_document_parse_only, regenerate_summary
 from app.services.evidence_service import find_evidence
-from app.services.outlier_service import compute_outliers
+# outlier_service removed — use NetworkGraph instead
 from app.services.network_service import compute_network
 from app.services.matrix_service import extract_row, fields_for
 from app.services.qa_service import answer_question
 from app.services.verification_service import check_text
-from app.services.llm import split_provider_model, emergent_key, default_model, LLMJSONError
+from app.services.llm import split_provider_model, default_model, LLMJSONError
 from app.services.auth_service import hash_password, verify_password, create_access_token, decode_token
 from app.services import cache as app_cache
 from app.services import queue as queue_worker
@@ -452,8 +450,6 @@ async def upload_documents(
         await db.documents.insert_one(meta.model_dump())
         results.append(meta)
 
-    # Invalidate outlier cache for this project since new docs are coming
-    app_cache.invalidate_outlier(project_id)
     return results
 
 
@@ -558,37 +554,32 @@ async def _load_settings() -> dict:
 
 
 def _models_for(settings: dict) -> list[dict]:
-    """Return the list of models the user can pick. Admin-configured only.
+    """Return the list of models available to the user.
 
-    - Cloud model exposed if EMERGENT_LLM_KEY is set (default: LLM_MODEL env var)
-    - Local LLM exposed if LOCAL_LLM_ENABLED is truthy in server env
+    Cloud models (Gemini / OpenAI / Anthropic) are shown only when the user
+    has configured the corresponding API key in Settings.
+    The admin-provided local LLM is shown when LOCAL_LLM_ENABLED=true in env.
     """
     models: list[dict] = []
-    if emergent_key():
-        primary_id = os.environ.get("LLM_MODEL", "gemini-2.0-flash")
-        # Detect provider from model id for the label prefix.
-        prov, _ = split_provider_model(primary_id, None)
-        models.append({"id": primary_id, "provider": prov, "label": f"{primary_id} (administrator)"})
-        # Also expose a couple of common alternates from the emergent stack.
-        alternates = [
-            ("gemini-3-flash-preview", "gemini"),
-            ("gpt-5.4-mini", "openai"),
-            ("claude-haiku-4-5", "anthropic"),
-        ]
-        seen = {primary_id}
-        for mid, prov in alternates:
-            if mid in seen:
-                continue
-            seen.add(mid)
-            models.append({"id": mid, "provider": prov, "label": f"{mid} (administrator)"})
 
-    # Admin-provided local LLM (Ollama / vLLM / gemma etc.)
+    # Cloud models — visible only if user has supplied a key
+    if settings.get("gemini_key"):
+        models.append({"id": "gemini-2.0-flash", "provider": "gemini", "label": "Gemini 2.0 Flash"})
+        models.append({"id": "gemini-1.5-pro", "provider": "gemini", "label": "Gemini 1.5 Pro"})
+    if settings.get("openai_key"):
+        models.append({"id": "gpt-4o-mini", "provider": "openai", "label": "GPT-4o Mini"})
+        models.append({"id": "gpt-4o", "provider": "openai", "label": "GPT-4o"})
+    if settings.get("anthropic_key"):
+        models.append({"id": "claude-3-5-haiku-latest", "provider": "anthropic", "label": "Claude 3.5 Haiku"})
+        models.append({"id": "claude-3-5-sonnet-latest", "provider": "anthropic", "label": "Claude 3.5 Sonnet"})
+
+    # Admin-provided local LLM (Ollama / vLLM)
     if os.environ.get("LOCAL_LLM_ENABLED", "false").lower() in ("1", "true", "yes"):
         local_name = os.environ.get("LOCAL_LLM_NAME", "gemma-llm")
         models.append({
             "id": local_name,
             "provider": "local",
-            "label": f"{local_name} (administrator)",
+            "label": f"{local_name} (local)",
         })
     return models
 
@@ -606,13 +597,15 @@ def _mask(value: str | None) -> str:
 @api.get("/settings")
 async def get_settings(_: dict = Depends(get_current_user)):
     s = await _load_settings()
+    # Merge admin local LLM env so it shows up in available models
+    s_with_local = {**s, **_local_llm_env_settings()}
     return {
         "theme": s.get("theme", "light"),
         "persona_id": s.get("persona_id", "akademisi_ketat"),
         "persona_custom": s.get("persona_custom", ""),
         "output_language": s.get("output_language", "en"),
         "ui_language": s.get("ui_language", "id"),
-        "default_model": s.get("default_model") or default_model(),
+        "default_model": s.get("default_model") or "",
         "gemini_key_masked": _mask(s.get("gemini_key")),
         "openai_key_masked": _mask(s.get("openai_key")),
         "anthropic_key_masked": _mask(s.get("anthropic_key")),
@@ -625,7 +618,7 @@ async def get_settings(_: dict = Depends(get_current_user)):
         "has_local": bool(s.get("local_endpoint") and s.get("local_model")),
         "personas": [{"id": k, "label": v["label"]} for k, v in PERSONAS.items()] + [{"id": "custom", "label": "Custom"}],
         "matrix_methods": [{"id": k, "label": v["label"]} for k, v in MATRIX_METHODS.items()],
-        "available_models": _models_for(s),
+        "available_models": _models_for(s_with_local),
     }
 
 
@@ -708,7 +701,7 @@ def _local_llm_env_settings() -> dict:
     if not enabled:
         return {}
     return {
-        "local_endpoint": os.environ.get("LOCAL_LLM_ENDPOINT", ""),
+        "local_endpoint": os.environ.get("OPENAI_BASE_URL", ""),
         "local_model": os.environ.get("LOCAL_LLM_NAME", "gemma-llm"),
         "local_api_key": os.environ.get("LOCAL_LLM_API_KEY", "ollama"),
     }
@@ -802,27 +795,7 @@ async def evidence_for_section(document_id: str, payload: dict = Body(...), curr
     return {"text": text, "items": items}
 
 
-# ── Outliers ──────────────────────────────────────────────────────────────────
-
-@api.get("/projects/{project_id}/outliers", response_model=OutlierResponse)
-async def project_outliers(project_id: str, current_user: dict = Depends(get_current_user)):
-    await _project_or_forbidden(project_id, current_user)
-
-    # Check cache first
-    cached = app_cache.get_outlier(project_id)
-    if cached:
-        return OutlierResponse(**cached)
-
-    docs = await db.documents.find({"project_id": project_id, "status": "ready"}, {"_id": 0}).to_list(500)
-    payload = []
-    for d in docs:
-        sents = await db.sentences.find({"document_id": d["id"]}, {"_id": 0}).to_list(5000)
-        payload.append({"id": d["id"], "title": d.get("title") or d.get("filename"), "sentences": sents})
-    res = compute_outliers(payload)
-
-    # Cache the result
-    app_cache.set_outlier(project_id, res)
-    return OutlierResponse(**res)
+# (outlier endpoint removed — use /projects/{id}/network instead)
 
 
 # ── Matrix ────────────────────────────────────────────────────────────────────
@@ -940,18 +913,17 @@ async def project_network(project_id: str, current_user: dict = Depends(get_curr
     return res
 
 
-# ── Config (public models the admin exposes) ─────────────────────────────────
+# ── Config ───────────────────────────────────────────────────────────────────
 
 @api.get("/config")
 async def app_config():
-    """Public server config: available models, embedding backend, upload limits."""
-    settings = await _load_settings()
+    """Public server config: supported providers, embedding info, upload limits."""
     return {
-        "available_models": _models_for(settings),
-        "default_model": os.environ.get("LLM_MODEL", "gemini-2.0-flash"),
+        "supported_providers": ["gemini", "openai", "anthropic"],
         "embedding_model": os.environ.get("EMBEDDING_MODEL", "paraphrase-multilingual-MiniLM-L12-v2"),
         "embedding_enabled": os.environ.get("EMBEDDING_ENABLED", "true").lower() in ("1", "true", "yes"),
         "local_llm_enabled": os.environ.get("LOCAL_LLM_ENABLED", "false").lower() in ("1", "true", "yes"),
+        "local_llm_name": os.environ.get("LOCAL_LLM_NAME", "") if os.environ.get("LOCAL_LLM_ENABLED", "false").lower() in ("1", "true", "yes") else "",
         "max_files_per_upload": MAX_FILES_PER_UPLOAD,
         "max_upload_size_mb": MAX_UPLOAD_SIZE_MB,
     }

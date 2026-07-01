@@ -45,7 +45,7 @@ Sebagian besar tool riset AI hanya menghasilkan ringkasan yang **tampak** meyaki
 |:--|:--|
 | **Frontend** | React 19 (CRA), Tailwind CSS v3, shadcn/ui, D3.js (force-directed graph), Sonner (toasts), React Router v6 |
 | **Backend** | FastAPI 0.110, Uvicorn, Motor (async MongoDB), Pydantic v2, PyMuPDF, rank_bm25 |
-| **AI** | Emergent Universal LLM Key (Gemini/OpenAI/Anthropic) atau vendor key native, sentence-transformers, `openai` SDK untuk Ollama compat |
+| **AI** | Google Gemini / OpenAI / Anthropic (via API key user), sentence-transformers, `openai` SDK untuk Ollama compat |
 | **Storage** | MongoDB 7.0, disk volume untuk uploads + model cache |
 | **Auth** | JWT (python-jose) + bcrypt, password lockout policy |
 | **Deploy** | Docker Compose (frontend Nginx, backend Uvicorn, mongo, opsional ollama) |
@@ -59,10 +59,12 @@ Sebagian besar tool riset AI hanya menghasilkan ringkasan yang **tampak** meyaki
 ```bash
 git clone <repo-url> jurnalmap && cd jurnalmap
 cp .env.example .env
-# Edit .env: isi EMERGENT_LLM_KEY, JWT_SECRET_KEY, ADMIN_PASSWORD
+# Edit .env: isi JWT_SECRET_KEY, ADMIN_PASSWORD
+# Opsional: isi LOCAL_LLM_ENABLED=true jika ada Ollama
 docker compose up -d --build
 open http://localhost:3000
 # Login: admin / <ADMIN_PASSWORD>
+# Lalu buka Settings → API Keys dan masukkan kunci LLM Anda
 ```
 
 Verifikasi:
@@ -111,26 +113,25 @@ Variabel yang wajib diisi ditandai **WAJIB**. Sisanya punya default aman.
 
 | Variabel | Wajib | Default | Keterangan |
 |:--|:-:|:--|:--|
-| `EMERGENT_LLM_KEY` | **✅** | — | Kunci universal Emergent untuk Gemini/OpenAI/Anthropic. Alternatif: `GEMINI_API_KEY` / `OPENAI_API_KEY` / `ANTHROPIC_API_KEY`. |
 | `JWT_SECRET_KEY` | **✅** | — | Rahasia untuk JWT. Gunakan `openssl rand -hex 32`. |
 | `ADMIN_USERNAME` | | `admin` | Akun admin yang di-seed saat startup. |
 | `ADMIN_PASSWORD` | **✅** | `admin` | **Wajib ubah di production.** |
-| `ADMIN_EMAIL` | | `admin@jurnalmap.local` | Email untuk forgot-password flow. |
-| `LLM_PROVIDER` | | `gemini` | `gemini` \| `openai` \| `anthropic` \| `local`. |
-| `LLM_MODEL` | | `gemini-2.0-flash` | Model default yang tampil di dropdown. |
-| `LOCAL_LLM_ENABLED` | | `false` | `true` untuk mengekspos Ollama/vLLM. |
-| `LOCAL_LLM_NAME` | | `gemma-llm` | Nama model lokal (mis. `llama3.1:8b`). Muncul di dropdown. |
-| `LOCAL_LLM_ENDPOINT` | | `http://ollama:11434/v1` | Endpoint OpenAI-compatible. |
-| `EMBEDDING_ENABLED` | | `true` | `false` = fallback ke TF-cosine (ringan tapi kurang akurat). |
-| `EMBEDDING_MODEL` | | `paraphrase-multilingual-MiniLM-L12-v2` | Pilihan lain: `intfloat/multilingual-e5-small`, `BAAI/bge-m3`. |
+| `ADMIN_EMAIL` | | `admin@jurnalmap.local` | Email admin. |
+| `LOCAL_LLM_ENABLED` | | `false` | `true` untuk mengekspos Ollama/vLLM ke dropdown model. |
+| `LOCAL_LLM_NAME` | | `gemma-llm` | Nama model lokal tampil di dropdown. |
+| `OPENAI_BASE_URL` | | `http://ollama:11434/v1` | Endpoint OpenAI-compatible untuk local LLM. |
+| `LOCAL_LLM_MODEL` | | `llama3.1:8b` | Model yang digunakan pada endpoint lokal. |
+| `EMBEDDING_ENABLED` | | `true` | `false` = fallback ke TF-cosine. |
+| `EMBEDDING_MODEL` | | `paraphrase-multilingual-MiniLM-L12-v2` | Model sentence-transformers. |
 | `MONGO_INITDB_ROOT_USERNAME/PASSWORD` | | `admin` / `changeme` | Kredensial root Mongo. |
 | `DB_NAME` | | `jurnalmap` | Nama database. |
 | `MAX_FILES_PER_UPLOAD` | | `5` | Batas file per POST upload. |
 | `MAX_UPLOAD_SIZE_MB` | | `50` | Batas ukuran per file. |
-| `QUEUE_POLL_INTERVAL` | | `1.5` | Detik antara polling worker antrean. |
 | `FRONTEND_PORT` / `BACKEND_PORT` | | `3000` / `8001` | Ubah bila konflik. |
 | `REACT_APP_BACKEND_URL` | **✅** | `http://localhost:8001` | Baked ke bundle saat frontend di-build. Wajib benar sebelum `docker compose build`. |
 | `CORS_ORIGINS` | | `*` | Di production: batasi ke domain frontend saja. |
+
+> **Catatan:** Kunci API LLM (Gemini, OpenAI, Anthropic) dikonfigurasi **per pengguna** melalui halaman Settings di UI — bukan melalui environment variable.
 
 ---
 

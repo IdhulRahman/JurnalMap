@@ -82,12 +82,14 @@ class Settings(BaseModel):
     theme: Literal["light", "dark"] = "light"
     persona_id: str = "akademisi_ketat"
     persona_custom: str = ""
-    # API keys (optional override; if empty, falls back to EMERGENT_LLM_KEY)
+    output_language: str = "en"  # "id" or "en"
+    ui_language: str = "id"
+    # Per-user API keys for cloud LLM providers
     gemini_key: str = ""
     openai_key: str = ""
     anthropic_key: str = ""
     default_provider: str = "gemini"
-    default_model: str = "gemini-3-flash-preview"
+    default_model: str = ""
 
 
 class AvailableModel(BaseModel):

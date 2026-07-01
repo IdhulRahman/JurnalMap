@@ -1,33 +1,42 @@
-"""LLM adapter — supports emergentintegrations (Gemini/OpenAI/Anthropic via Emergent
-universal key) AND OpenAI-compatible endpoints (Ollama / vLLM / LM Studio) when
-the user provides a local_endpoint in Settings.
+"""LLM adapter — supports Google Gemini, OpenAI, Anthropic (via native SDKs),
+and OpenAI-compatible local endpoints (Ollama / vLLM / LM Studio).
 
-Resilient JSON parsing with LLMJSONError as a single recoverable boundary.
+API keys come exclusively from the user's Settings stored in the database.
+There is no server-level cloud API key; admins only configure the local LLM.
+
+Key resolution chain:
+  1. User's per-provider key from Settings (gemini_key / openai_key / anthropic_key)
+  2. For local provider: endpoint + model from user Settings (overridden by admin env if LOCAL_LLM_ENABLED)
+  3. ValueError raised if no valid key / endpoint is available.
+
+Resilient JSON parsing with LLMJSONError as the single recoverable boundary.
 """
 from __future__ import annotations
 
 import json
 import os
 import re
+import uuid
 from typing import Any, Optional
 
-from emergentintegrations.llm.chat import LlmChat, UserMessage
 
-
-def emergent_key() -> str:
-    return os.environ.get("EMERGENT_LLM_KEY", "")
-
+# ---------------------------------------------------------------------------
+# Helpers
+# ---------------------------------------------------------------------------
 
 def default_provider() -> str:
     return os.environ.get("LLM_PROVIDER", "gemini")
 
 
 def default_model() -> str:
-    return os.environ.get("LLM_MODEL", "gemini-3-flash-preview")
+    return os.environ.get("LLM_MODEL", "gemini-2.0-flash")
 
 
 def resolve_key(provider: str, user_settings: Optional[dict] = None) -> str:
-    """Pick the right API key. Fallback chain: user setting → EMERGENT_LLM_KEY."""
+    """Return the API key for the given provider from user settings.
+
+    Raises ValueError if no key is found (no fallback to any server-side key).
+    """
     if user_settings:
         if provider == "gemini" and user_settings.get("gemini_key"):
             return user_settings["gemini_key"]
@@ -35,18 +44,23 @@ def resolve_key(provider: str, user_settings: Optional[dict] = None) -> str:
             return user_settings["openai_key"]
         if provider == "anthropic" and user_settings.get("anthropic_key"):
             return user_settings["anthropic_key"]
-        if provider == "local" and user_settings.get("local_api_key"):
-            return user_settings["local_api_key"]
-    return emergent_key()
+        if provider == "local":
+            return user_settings.get("local_api_key", "ollama")
+    raise ValueError(
+        f"No API key configured for provider '{provider}'. "
+        "Please add your API key in Settings → API Keys."
+    )
 
 
 def _is_local(provider: str, user_settings: Optional[dict]) -> bool:
     return provider == "local" and bool(user_settings and user_settings.get("local_endpoint"))
 
 
-# --- OpenAI-compatible client (lazy-imported) ---
-async def _local_generate(
-    endpoint: str,
+# ---------------------------------------------------------------------------
+# Provider-specific generate functions
+# ---------------------------------------------------------------------------
+
+async def _gemini_generate(
     api_key: str,
     model: str,
     system: str,
@@ -54,10 +68,43 @@ async def _local_generate(
     *,
     want_json: bool = False,
 ) -> str:
-    """Use the OpenAI SDK against a custom base_url. Supports Ollama / vLLM / LM Studio."""
+    """Generate via Google Gemini using the google-genai SDK."""
+    from google import genai
+    from google.genai import types
+
+    client = genai.Client(api_key=api_key)
+    config_kwargs: dict[str, Any] = {"temperature": 0.2}
+    if want_json:
+        config_kwargs["response_mime_type"] = "application/json"
+
+    response = await client.aio.models.generate_content(
+        model=model,
+        contents=user,
+        config=types.GenerateContentConfig(
+            system_instruction=system,
+            **config_kwargs,
+        ),
+    )
+    return (response.text or "").strip()
+
+
+async def _openai_generate(
+    api_key: str,
+    model: str,
+    system: str,
+    user: str,
+    *,
+    endpoint: Optional[str] = None,
+    want_json: bool = False,
+) -> str:
+    """Generate via OpenAI SDK (also handles Ollama / vLLM / LM Studio)."""
     from openai import AsyncOpenAI
 
-    client = AsyncOpenAI(api_key=api_key or "ollama", base_url=endpoint.rstrip("/"))
+    kwargs_client: dict[str, Any] = {"api_key": api_key or "ollama"}
+    if endpoint:
+        kwargs_client["base_url"] = endpoint.rstrip("/")
+
+    client = AsyncOpenAI(**kwargs_client)
     kwargs: dict[str, Any] = {
         "model": model,
         "messages": [
@@ -72,23 +119,34 @@ async def _local_generate(
     return (resp.choices[0].message.content or "").strip()
 
 
-def _new_chat(
-    session_id: str,
-    system_message: str,
+async def _anthropic_generate(
+    api_key: str,
+    model: str,
+    system: str,
+    user: str,
     *,
-    provider: Optional[str] = None,
-    model: Optional[str] = None,
-    user_settings: Optional[dict] = None,
-) -> LlmChat:
-    prov = provider or default_provider()
-    mdl = model or default_model()
-    api_key = resolve_key(prov, user_settings)
-    return LlmChat(
-        api_key=api_key,
-        session_id=session_id,
-        system_message=system_message,
-    ).with_model(prov, mdl)
+    want_json: bool = False,
+) -> str:
+    """Generate via Anthropic SDK (Claude models)."""
+    from anthropic import AsyncAnthropic
 
+    client = AsyncAnthropic(api_key=api_key)
+    system_prompt = system
+    if want_json:
+        system_prompt += "\n\nYou MUST respond with valid JSON only. No prose, no markdown."
+
+    message = await client.messages.create(
+        model=model,
+        max_tokens=4096,
+        system=system_prompt,
+        messages=[{"role": "user", "content": user}],
+    )
+    return (message.content[0].text or "").strip()
+
+
+# ---------------------------------------------------------------------------
+# Unified generate interface
+# ---------------------------------------------------------------------------
 
 async def generate(
     session_id: str,
@@ -100,24 +158,35 @@ async def generate(
     user_settings: Optional[dict] = None,
     want_json: bool = False,
 ) -> str:
-    if _is_local(provider or "", user_settings):
-        return await _local_generate(
-            endpoint=user_settings["local_endpoint"],
+    """Route to the correct provider adapter and return raw text."""
+    prov = provider or default_provider()
+    mdl = model or default_model()
+
+    if _is_local(prov, user_settings):
+        return await _openai_generate(
             api_key=user_settings.get("local_api_key", "ollama"),
-            model=model or user_settings.get("local_model", "llama3.1:8b"),
+            model=mdl or user_settings.get("local_model", "llama3.1:8b"),
             system=system,
             user=user,
+            endpoint=user_settings["local_endpoint"],
             want_json=want_json,
         )
-    chat = _new_chat(session_id, system, provider=provider, model=model, user_settings=user_settings)
-    # Best-effort JSON-mode hint for providers via emergent — fall back to system prompt only.
-    try:
-        if want_json and hasattr(chat, "with_response_format"):
-            chat = chat.with_response_format({"type": "json_object"})
-    except Exception:
-        pass
-    return await chat.send_message(UserMessage(text=user))
 
+    api_key = resolve_key(prov, user_settings)
+
+    if prov == "gemini":
+        return await _gemini_generate(api_key, mdl, system, user, want_json=want_json)
+    if prov == "openai":
+        return await _openai_generate(api_key, mdl, system, user, want_json=want_json)
+    if prov == "anthropic":
+        return await _anthropic_generate(api_key, mdl, system, user, want_json=want_json)
+
+    raise ValueError(f"Unknown provider '{prov}'. Supported: gemini, openai, anthropic, local.")
+
+
+# ---------------------------------------------------------------------------
+# JSON generation with resilient parsing
+# ---------------------------------------------------------------------------
 
 _JSON_BLOCK = re.compile(r"\{.*\}|\[.*\]", re.S)
 
@@ -174,7 +243,9 @@ async def generate_json(
     return _try_parse_json(raw)
 
 
-# ---- Persona handling ----
+# ---------------------------------------------------------------------------
+# Persona handling
+# ---------------------------------------------------------------------------
 from app.models.schemas import PERSONAS  # noqa: E402
 
 

@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useState, useCallback } from "react";
 import { useNavigate } from "react-router-dom";
 import {
   ArrowLeft,
@@ -9,6 +9,12 @@ import {
   Loader2,
   Save,
   Languages,
+  Key,
+  Eye,
+  EyeOff,
+  CheckCircle2,
+  XCircle,
+  Zap,
 } from "lucide-react";
 import { toast } from "sonner";
 import { useSettings } from "@/store/settings";
@@ -16,6 +22,7 @@ import { useT } from "@/lib/useT";
 import Header from "@/components/Header";
 import ChangePasswordCard from "@/components/ChangePasswordCard";
 import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import {
   Select,
@@ -24,17 +31,16 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import { api } from "@/services/api";
 
 /**
- * Simplified Settings:
+ * Settings:
  *   - Appearance (Light / Dark / System)
  *   - UI Language (id / en)
- *   - AI Persona (uses server-side default; still editable)
+ *   - LLM API Keys (Gemini / OpenAI / Anthropic) — per-user, stored in DB
+ *   - AI Persona (system prompt)
+ *   - Available models (read-only, derived from configured keys)
  *   - Change password
- *
- * All LLM key / provider / model inputs are removed — models are supplied by
- * the administrator via environment variables. Per-feature output language is
- * chosen in each feature's own panel (Ringkas, Tanya), not here.
  */
 export default function SettingsPage() {
   const nav = useNavigate();
@@ -42,6 +48,12 @@ export default function SettingsPage() {
   const { t } = useT();
   const [local, setLocal] = useState(null);
   const [saving, setSaving] = useState(false);
+
+  // API key state
+  const [keys, setKeys] = useState({ gemini_key: "", openai_key: "", anthropic_key: "" });
+  const [keyVisible, setKeyVisible] = useState({ gemini_key: false, openai_key: false, anthropic_key: false });
+  const [keyTestStatus, setKeyTestStatus] = useState({ gemini_key: null, openai_key: null, anthropic_key: null }); // null | "testing" | "ok" | "fail"
+  const [savingKeys, setSavingKeys] = useState(false);
 
   useEffect(() => {
     if (settings) {
@@ -78,6 +90,54 @@ export default function SettingsPage() {
       setSaving(false);
     }
   };
+
+  const testKey = async (provider) => {
+    const keyField = `${provider}_key`;
+    const keyValue = keys[keyField];
+    if (!keyValue.trim()) return;
+
+    setKeyTestStatus((s) => ({ ...s, [keyField]: "testing" }));
+    const defaultModels = { gemini: "gemini-2.0-flash", openai: "gpt-4o-mini", anthropic: "claude-3-5-haiku-latest" };
+    try {
+      const result = await api.testApiKey({
+        provider,
+        api_key: keyValue.trim(),
+        model: defaultModels[provider],
+      });
+      setKeyTestStatus((s) => ({ ...s, [keyField]: result.ok ? "ok" : "fail" }));
+      if (result.ok) {
+        toast.success(`${t("settings.keys.testOk")} (${result.model})`);
+      } else {
+        toast.error(`${t("settings.keys.testFail")}: ${result.error || "unknown error"}`);
+      }
+    } catch (e) {
+      setKeyTestStatus((s) => ({ ...s, [keyField]: "fail" }));
+      toast.error(t("settings.keys.testFail"));
+    }
+  };
+
+  const saveKeys = async () => {
+    setSavingKeys(true);
+    try {
+      await update({
+        gemini_key: keys.gemini_key.trim(),
+        openai_key: keys.openai_key.trim(),
+        anthropic_key: keys.anthropic_key.trim(),
+      });
+      toast.success(t("settings.keys.saved"));
+      await reload();
+    } catch {
+      toast.error("Save failed");
+    } finally {
+      setSavingKeys(false);
+    }
+  };
+
+  const providers = [
+    { field: "gemini_key", label: t("settings.keys.gemini"), provider: "gemini", placeholder: "AIza..." },
+    { field: "openai_key", label: t("settings.keys.openai"), provider: "openai", placeholder: "sk-..." },
+    { field: "anthropic_key", label: t("settings.keys.anthropic"), provider: "anthropic", placeholder: "sk-ant-..." },
+  ];
 
   return (
     <div className="min-h-screen bg-[color:var(--jm-bg)]">
@@ -164,6 +224,103 @@ export default function SettingsPage() {
           </div>
         </Section>
 
+        {/* LLM API Keys */}
+        <Section testId="settings-keys-section" icon={Key} title={t("settings.keys")} hint={t("settings.keys.hint")}>
+          <div className="space-y-4">
+            {providers.map(({ field, label, provider, placeholder }) => {
+              const status = keyTestStatus[field];
+              return (
+                <div key={field} data-testid={`settings-key-${provider}`} className="space-y-1.5">
+                  <label className="text-[11px] uppercase tracking-[0.18em] font-semibold text-[color:var(--jm-text-3)]">
+                    {label}
+                    {settings[`has_${provider}_key`] && (
+                      <span className="ml-2 text-green-500 normal-case tracking-normal font-normal text-xs">
+                        ✓ {settings[`${provider}_key_masked`]}
+                      </span>
+                    )}
+                  </label>
+                  <div className="flex items-center gap-2">
+                    <div className="relative flex-1">
+                      <Input
+                        data-testid={`key-input-${provider}`}
+                        type={keyVisible[field] ? "text" : "password"}
+                        value={keys[field]}
+                        onChange={(e) => {
+                          setKeys((s) => ({ ...s, [field]: e.target.value }));
+                          setKeyTestStatus((s) => ({ ...s, [field]: null }));
+                        }}
+                        placeholder={settings[`has_${provider}_key`] ? "••••••••••••" : placeholder}
+                        className="pr-10 bg-[color:var(--jm-surface)] border-[color:var(--jm-border)] text-[color:var(--jm-text)] font-mono text-sm"
+                      />
+                      <button
+                        type="button"
+                        onClick={() => setKeyVisible((s) => ({ ...s, [field]: !s[field] }))}
+                        className="absolute right-2.5 top-1/2 -translate-y-1/2 text-[color:var(--jm-text-3)] hover:text-[color:var(--jm-text)]"
+                      >
+                        {keyVisible[field] ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                      </button>
+                    </div>
+                    <Button
+                      data-testid={`key-test-${provider}`}
+                      variant="outline"
+                      size="sm"
+                      disabled={!keys[field].trim() || status === "testing"}
+                      onClick={() => testKey(provider)}
+                      className="shrink-0 gap-1.5 border-[color:var(--jm-border)] text-[color:var(--jm-text-2)] hover:text-[color:var(--jm-text)]"
+                    >
+                      {status === "testing" ? (
+                        <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                      ) : status === "ok" ? (
+                        <CheckCircle2 className="w-3.5 h-3.5 text-green-500" />
+                      ) : status === "fail" ? (
+                        <XCircle className="w-3.5 h-3.5 text-red-500" />
+                      ) : (
+                        <Zap className="w-3.5 h-3.5" />
+                      )}
+                      {status === "testing"
+                        ? t("settings.keys.testing")
+                        : t("settings.keys.test")}
+                    </Button>
+                  </div>
+                </div>
+              );
+            })}
+            <div className="flex justify-end pt-1">
+              <Button
+                data-testid="settings-save-keys-btn"
+                onClick={saveKeys}
+                disabled={savingKeys}
+                className="bg-[color:var(--jm-text)] text-[color:var(--jm-bg)] hover:opacity-90 gap-2"
+              >
+                {savingKeys ? <Loader2 className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />}
+                {t("settings.keys.save")}
+              </Button>
+            </div>
+          </div>
+        </Section>
+
+        {/* Available models (derived from configured keys) */}
+        <Section testId="settings-model-info-section" title={t("settings.model")} hint={t("settings.model.hint")}>
+          <ul data-testid="available-model-list" className="space-y-1.5">
+            {(settings.available_models || []).map((m) => (
+              <li key={`${m.provider}-${m.id}`} className="text-sm font-ui text-[color:var(--jm-text-2)] flex items-center gap-2">
+                <span className="w-1.5 h-1.5 rounded-full bg-[color:var(--jm-accent)]" />
+                <span className="font-mono">{m.id}</span>
+                <span className="text-[10px] uppercase tracking-[0.18em] text-[color:var(--jm-text-3)]">
+                  {m.provider}
+                </span>
+              </li>
+            ))}
+            {(!settings.available_models || settings.available_models.length === 0) && (
+              <li className="text-sm text-[color:var(--jm-text-3)] font-ui">
+                {local.ui_language === "id"
+                  ? "Belum ada model tersedia. Masukkan API key di atas."
+                  : "No models available yet. Enter an API key above."}
+              </li>
+            )}
+          </ul>
+        </Section>
+
         {/* Persona */}
         <Section testId="settings-persona-section" icon={UserCircle2} title={t("settings.persona")}>
           <Select value={local.persona_id} onValueChange={(v) => setLocal((s) => ({ ...s, persona_id: v }))}>
@@ -195,26 +352,6 @@ export default function SettingsPage() {
               {t("settings.save")}
             </Button>
           </div>
-        </Section>
-
-        {/* Admin-provided models info (read-only) */}
-        <Section testId="settings-model-info-section" title={t("settings.model")} hint="Disediakan oleh administrator.">
-          <ul data-testid="admin-model-list" className="space-y-1.5">
-            {(settings.available_models || []).map((m) => (
-              <li key={`${m.provider}-${m.id}`} className="text-sm font-ui text-[color:var(--jm-text-2)] flex items-center gap-2">
-                <span className="w-1.5 h-1.5 rounded-full bg-[color:var(--jm-accent)]" />
-                <span className="font-mono">{m.id}</span>
-                <span className="text-[10px] uppercase tracking-[0.18em] text-[color:var(--jm-text-3)]">
-                  {m.provider}
-                </span>
-              </li>
-            ))}
-            {(!settings.available_models || settings.available_models.length === 0) && (
-              <li className="text-sm text-[color:var(--jm-text-3)] font-ui">
-                Tidak ada model yang dikonfigurasi.
-              </li>
-            )}
-          </ul>
         </Section>
 
         {/* Security: Change Password */}

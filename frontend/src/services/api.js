@@ -106,10 +106,6 @@ export const api = {
   evidenceForSection: (docId, text) =>
     http.post(`/documents/${docId}/section-evidence`, { text }).then((r) => r.data),
 
-  // ── Outliers (legacy — replaced by Network) ──────────────────
-  outliers: (projectId) =>
-    http.get(`/projects/${projectId}/outliers`).then((r) => r.data),
-
   // ── Network Graph ────────────────────────────────────────────
   network: (projectId) =>
     http.get(`/projects/${projectId}/network`).then((r) => r.data),

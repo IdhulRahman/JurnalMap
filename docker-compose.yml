@@ -59,14 +59,11 @@ services:
       MONGO_URL: mongodb://${MONGO_INITDB_ROOT_USERNAME:-admin}:${MONGO_INITDB_ROOT_PASSWORD:-changeme}@mongo:27017/${DB_NAME:-jurnalmap}?authSource=admin
       DB_NAME: ${DB_NAME:-jurnalmap}
       UPLOAD_DIR: /app/uploads
-      # LLM config
-      EMERGENT_LLM_KEY: ${EMERGENT_LLM_KEY:-}
-      LLM_PROVIDER: ${LLM_PROVIDER:-gemini}
-      LLM_MODEL: ${LLM_MODEL:-gemini-2.0-flash}
-      # Local LLM (admin-provided). Set LOCAL_LLM_ENABLED=true to expose it in the UI.
+      # Local LLM (admin-provided). Set LOCAL_LLM_ENABLED=true to expose in the UI.
       LOCAL_LLM_ENABLED: ${LOCAL_LLM_ENABLED:-false}
       LOCAL_LLM_NAME: ${LOCAL_LLM_NAME:-gemma-llm}
-      LOCAL_LLM_ENDPOINT: ${LOCAL_LLM_ENDPOINT:-http://ollama:11434/v1}
+      OPENAI_BASE_URL: ${OPENAI_BASE_URL:-http://ollama:11434/v1}
+      LOCAL_LLM_MODEL: ${LOCAL_LLM_MODEL:-llama3.1:8b}
       LOCAL_LLM_API_KEY: ${LOCAL_LLM_API_KEY:-ollama}
       # Embeddings (network graph)
       EMBEDDING_ENABLED: ${EMBEDDING_ENABLED:-true}
