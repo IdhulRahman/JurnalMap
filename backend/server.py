@@ -25,8 +25,9 @@ from fastapi import (
     Body,
     Depends,
     status,
+    Request,
 )
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, JSONResponse
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from motor.motor_asyncio import AsyncIOMotorClient
 from starlette.middleware.cors import CORSMiddleware
@@ -86,6 +87,57 @@ db = client[os.environ["DB_NAME"]]
 
 app = FastAPI(title="JurnalMap API")
 api = APIRouter(prefix="/api")
+
+# ── Global Exception Handlers for LLMs ────────────────────────────────────────
+
+try:
+    from google.genai.errors import APIError as GeminiAPIError
+except ImportError:
+    class GeminiAPIError(Exception): pass
+
+try:
+    from openai import OpenAIError
+except ImportError:
+    class OpenAIError(Exception): pass
+
+try:
+    from anthropic import APIError as AnthropicAPIError
+except ImportError:
+    class AnthropicAPIError(Exception): pass
+
+@app.exception_handler(ValueError)
+async def value_error_exception_handler(request: Request, exc: ValueError):
+    logger.warning("ValueError caught: %s", exc)
+    return JSONResponse(
+        status_code=400,
+        content={"detail": str(exc)},
+    )
+
+@app.exception_handler(GeminiAPIError)
+async def gemini_api_error_handler(request: Request, exc: GeminiAPIError):
+    logger.error("Gemini API Error: %s", exc)
+    return JSONResponse(
+        status_code=502,
+        content={"detail": f"Gemini API Error: {exc}"},
+    )
+
+@app.exception_handler(OpenAIError)
+async def openai_error_handler(request: Request, exc: OpenAIError):
+    logger.error("OpenAI API Error: %s", exc)
+    msg = exc.message if hasattr(exc, "message") else str(exc)
+    return JSONResponse(
+        status_code=502,
+        content={"detail": f"OpenAI API Error: {msg}"},
+    )
+
+@app.exception_handler(AnthropicAPIError)
+async def anthropic_error_handler(request: Request, exc: AnthropicAPIError):
+    logger.error("Anthropic API Error: %s", exc)
+    msg = exc.message if hasattr(exc, "message") else str(exc)
+    return JSONResponse(
+        status_code=502,
+        content={"detail": f"Anthropic API Error: {msg}"},
+    )
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
 logger = logging.getLogger("jurnalmap")
