@@ -10,9 +10,8 @@ FROM node:20-alpine AS builder
 
 WORKDIR /app
 
-# Install dependencies first (better layer caching)
-COPY package.json yarn.lock* ./
-RUN yarn install --frozen-lockfile
+COPY package.json ./
+RUN yarn install
 
 # Copy source code
 COPY . .
