@@ -1,27 +1,38 @@
+/* ============================================================
+   CheckFix — Annotation Styles
+   Highlight-only approach: no floating ::before labels,
+   just clean colour bands and a subtle left border.
+   ============================================================ */
+
 .cf-units {
   font-family: var(--jm-reading, Georgia, serif);
   font-size: 15px;
-  line-height: 1.65;
+  line-height: 1.72;
   color: var(--jm-text);
 }
+
+/* Paragraphs / list items: spacing + highlight band */
 .cf-units p,
 .cf-units li {
-  margin: 0 0 0.85rem 0;
-  padding: 0.6rem 0.75rem;
+  margin: 0 0 0.7rem 0;
+  padding: 0.55rem 0.9rem;
   border-left: 3px solid transparent;
-  border-radius: 0.35rem;
+  border-radius: 0.4rem;
   transition: background 120ms ease;
 }
+
+/* List containers */
 .cf-units ul.cf-list,
 .cf-units ol.cf-list {
   padding-left: 1.25rem;
-  margin: 0;
+  margin: 0 0 0.7rem 0;
 }
 .cf-units ul.cf-list { list-style: disc; }
 .cf-units ol.cf-list { list-style: decimal; }
 
+/* ---- Status colours ---- */
 .cf-supported {
-  background: rgba(16, 185, 129, 0.08);
+  background: rgba(16, 185, 129, 0.09);
   border-left-color: #10b981;
 }
 .cf-similar {
@@ -29,41 +40,31 @@
   border-left-color: #f59e0b;
 }
 .cf-unsupported {
-  background: rgba(244, 63, 94, 0.08);
+  background: rgba(244, 63, 94, 0.09);
   border-left-color: #f43f5e;
 }
 
-.cf-unit[data-status] {
-  position: relative;
-}
-.cf-unit[data-status]::before {
-  position: absolute;
-  top: 0.4rem;
-  right: 0.5rem;
-  font-size: 10px;
-  font-family: var(--jm-ui, ui-sans-serif, system-ui);
-  font-weight: 700;
-  letter-spacing: 0.16em;
-  text-transform: uppercase;
-  opacity: 0.7;
-}
-.cf-supported::before { content: "\1F7E2 DIDUKUNG"; }
-.cf-similar::before   { content: "\1F7E1 MIRIP"; }
-.cf-unsupported::before { content: "\1F534 TIDAK DIDUKUNG"; }
+/* Dark-mode overrides */
+.dark .cf-supported  { background: rgba(16, 185, 129, 0.12); }
+.dark .cf-similar    { background: rgba(245, 158, 11, 0.12); }
+.dark .cf-unsupported{ background: rgba(244, 63, 94, 0.12); }
 
+/* ---- Inline citation badges ---- */
 .jm-citation-badge {
   display: inline-flex;
   align-items: center;
   vertical-align: baseline;
-  padding: 0 0.4em;
+  padding: 0.05em 0.45em;
   margin: 0 0.1em;
   border-radius: 0.35rem;
   font-family: var(--jm-ui, ui-sans-serif, system-ui);
-  font-size: 0.78em;
+  font-size: 0.76em;
   font-weight: 600;
   background: var(--jm-text);
   color: var(--jm-bg);
   cursor: pointer;
   user-select: none;
   -webkit-user-select: none;
+  transition: opacity 120ms;
 }
+.jm-citation-badge:hover { opacity: 0.8; }

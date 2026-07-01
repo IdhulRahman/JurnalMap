@@ -95,7 +95,7 @@ export default function CheckFixEditor({
             <p>
               Gunakan prompt ini di AI Anda:
               <span className="block mt-1 italic">
-                “Berikan daftar pustaka dari semua referensi yang Anda gunakan dalam format APA atau IEEE. Bungkus dalam satu blok teks.”
+                "Berikan daftar pustaka dari semua referensi yang Anda gunakan dalam format APA atau IEEE. Bungkus dalam satu blok teks."
               </span>
             </p>
             <p className="mt-2">Lalu salin hasilnya ke kolom Daftar Pustaka. Daftar ini meningkatkan kepercayaan saat mencari sumber.</p>
@@ -145,29 +145,77 @@ export default function CheckFixEditor({
         </div>
       </div>
 
-      {/* Summary + annotated result */}
+      {/* ======================================================
+          Result area — clean stats banner + highlighted text
+         ====================================================== */}
       {result && (
-        <div data-testid="checkfix-result" className="mt-6 pt-5 border-t border-[color:var(--jm-border)] space-y-4">
-          <div className="flex items-center gap-2 text-[10px] uppercase tracking-[0.22em] font-semibold text-[color:var(--jm-text-3)]">
-            <ListChecks className="w-3.5 h-3.5" /> Hasil Verifikasi
-          </div>
-          <div data-testid="checkfix-summary" className="flex flex-wrap gap-2 text-xs font-ui">
-            <Stat icon={CircleCheck} colorClass="text-emerald-600" label="Didukung" value={result.summary.supported} />
-            <Stat icon={CircleAlert} colorClass="text-amber-600" label="Mirip" value={result.summary.similar} />
-            <Stat icon={CircleX} colorClass="text-rose-600" label="Tidak Didukung" value={result.summary.unsupported} />
-            <div className="ml-auto self-center text-[11px] text-[color:var(--jm-text-3)]">
-              Total: {result.summary.total} unit
+        <div data-testid="checkfix-result" className="mt-6 pt-5 border-t border-[color:var(--jm-border)] space-y-5">
+
+          {/* ── Stats banner ── */}
+          <div
+            data-testid="checkfix-summary"
+            className="rounded-xl border border-[color:var(--jm-border)] bg-[color:var(--jm-sidebar)] px-5 py-4"
+          >
+            <div className="flex items-center gap-2 text-[10px] uppercase tracking-[0.22em] font-semibold text-[color:var(--jm-text-3)] mb-4">
+              <ListChecks className="w-3.5 h-3.5" />
+              Hasil Verifikasi
+            </div>
+            <div className="grid grid-cols-3 divide-x divide-[color:var(--jm-border)]">
+              <StatBig
+                icon={CircleCheck}
+                colorClass="text-emerald-600 dark:text-emerald-400"
+                bgClass="bg-emerald-50 dark:bg-emerald-900/20"
+                label="Didukung"
+                value={result.summary.supported}
+                testId="checkfix-stat-supported"
+              />
+              <StatBig
+                icon={CircleAlert}
+                colorClass="text-amber-600 dark:text-amber-400"
+                bgClass="bg-amber-50 dark:bg-amber-900/20"
+                label="Mirip"
+                value={result.summary.similar}
+                testId="checkfix-stat-similar"
+              />
+              <StatBig
+                icon={CircleX}
+                colorClass="text-rose-600 dark:text-rose-400"
+                bgClass="bg-rose-50 dark:bg-rose-900/20"
+                label="Tidak Didukung"
+                value={result.summary.unsupported}
+                testId="checkfix-stat-unsupported"
+              />
+            </div>
+            <div className="mt-3 text-[11px] text-[color:var(--jm-text-3)] font-ui text-right">
+              Total {result.summary.total} unit diperiksa
             </div>
           </div>
 
+          {/* ── Legend ── */}
+          <div className="flex flex-wrap items-center gap-4 text-[11px] font-ui text-[color:var(--jm-text-3)]">
+            <span className="flex items-center gap-1.5">
+              <span className="inline-block w-3 h-3 rounded-sm bg-emerald-500/20 border-l-2 border-emerald-500" />
+              Didukung — bukti kuat di paper
+            </span>
+            <span className="flex items-center gap-1.5">
+              <span className="inline-block w-3 h-3 rounded-sm bg-amber-400/20 border-l-2 border-amber-400" />
+              Mirip — ada kecocokan parsial
+            </span>
+            <span className="flex items-center gap-1.5">
+              <span className="inline-block w-3 h-3 rounded-sm bg-rose-500/20 border-l-2 border-rose-500" />
+              Tidak Didukung — tidak ditemukan
+            </span>
+          </div>
+
+          {/* ── Annotated text ── */}
           <div
             ref={annotatedRef}
             data-testid="checkfix-annotated"
-            className="rounded-lg border border-[color:var(--jm-border)] bg-[color:var(--jm-surface)] p-4"
+            className="cf-units rounded-xl border border-[color:var(--jm-border)] bg-[color:var(--jm-surface)] p-5 leading-relaxed"
             dangerouslySetInnerHTML={{ __html: result.annotated_html }}
           />
 
-          {/* Suggestions for unsupported units */}
+          {/* ── Suggestions for unsupported units ── */}
           {result.units.some((u) => u.status === "unsupported" && (u.suggestions || []).length > 0) && (
             <div data-testid="checkfix-suggestions" className="space-y-2">
               <div className="text-[10px] uppercase tracking-[0.22em] font-semibold text-[color:var(--jm-text-3)]">
@@ -182,7 +230,7 @@ export default function CheckFixEditor({
                     className="rounded-md border border-[color:var(--jm-border)] bg-[color:var(--jm-reading)] p-3"
                   >
                     <div className="text-xs font-ui italic text-[color:var(--jm-text-2)] mb-1">
-                      “{u.text.slice(0, 140)}{u.text.length > 140 ? "…" : ""}”
+                      "{u.text.slice(0, 140)}{u.text.length > 140 ? "…" : ""}"
                     </div>
                     <div className="text-[11px] text-[color:var(--jm-text-3)] font-ui mb-2">
                       Apakah maksud Anda merujuk ke salah satu sumber berikut?
@@ -208,12 +256,15 @@ export default function CheckFixEditor({
   );
 }
 
-function Stat({ icon: Icon, colorClass, label, value }) {
+/* ── Stat tile — big number version ── */
+function StatBig({ icon: Icon, colorClass, bgClass, label, value, testId }) {
   return (
-    <div className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md bg-[color:var(--jm-sidebar)]">
-      <Icon className={`w-3.5 h-3.5 ${colorClass}`} />
-      <span className="font-semibold text-[color:var(--jm-text)]">{value}</span>
-      <span className="text-[10px] uppercase tracking-[0.18em] font-semibold text-[color:var(--jm-text-3)]">
+    <div data-testid={testId} className="flex flex-col items-center gap-1 px-4 py-1 first:rounded-l-lg last:rounded-r-lg">
+      <div className={`w-9 h-9 rounded-full flex items-center justify-center mb-1 ${bgClass}`}>
+        <Icon className={`w-5 h-5 ${colorClass}`} />
+      </div>
+      <span className={`text-3xl font-bold font-display tracking-tight ${colorClass}`}>{value}</span>
+      <span className="text-[10px] uppercase tracking-[0.18em] font-semibold text-[color:var(--jm-text-3)] text-center leading-tight">
         {label}
       </span>
     </div>

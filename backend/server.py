@@ -24,8 +24,11 @@ from fastapi import (
     File,
     HTTPException,
     Body,
+    Depends,
+    status,
 )
 from fastapi.responses import FileResponse
+from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from motor.motor_asyncio import AsyncIOMotorClient
 from starlette.middleware.cors import CORSMiddleware
 
@@ -49,6 +52,7 @@ from app.models.schemas import (
     new_uid,
     utcnow_iso,
 )
+from app.models.user import User, UserCreate, UserLogin, TokenResponse
 from app.services.document_processor import process_document, regenerate_summary
 from app.services.evidence_service import find_evidence
 from app.services.outlier_service import compute_outliers
@@ -56,10 +60,18 @@ from app.services.matrix_service import extract_row, fields_for
 from app.services.qa_service import answer_question
 from app.services.verification_service import check_text
 from app.services.llm import split_provider_model, emergent_key, default_model, LLMJSONError
+from app.services.auth_service import hash_password, verify_password, create_access_token, decode_token
+from app.services import cache as app_cache
 
 
 UPLOAD_DIR = Path(os.environ.get("UPLOAD_DIR", str(ROOT_DIR / "uploads")))
 UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
+
+# Max files per upload request
+MAX_FILES_PER_UPLOAD = int(os.environ.get("MAX_FILES_PER_UPLOAD", "5"))
+# Max file size in MB
+MAX_UPLOAD_SIZE_MB = int(os.environ.get("MAX_UPLOAD_SIZE_MB", "50"))
+MAX_UPLOAD_SIZE_BYTES = MAX_UPLOAD_SIZE_MB * 1024 * 1024
 
 mongo_url = os.environ["MONGO_URL"]
 client = AsyncIOMotorClient(mongo_url)
@@ -71,8 +83,31 @@ api = APIRouter(prefix="/api")
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
 logger = logging.getLogger("jurnalmap")
 
+# ── JWT Security ─────────────────────────────────────────────────────────────
 
-# ---- Helpers ----
+_bearer_scheme = HTTPBearer(auto_error=False)
+
+
+async def get_current_user(
+    credentials: Optional[HTTPAuthorizationCredentials] = Depends(_bearer_scheme),
+) -> dict:
+    """Dependency: extract and validate JWT, return user dict."""
+    if not credentials or not credentials.credentials:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Not authenticated")
+    payload = decode_token(credentials.credentials)
+    if not payload:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid or expired token")
+    user_id = payload.get("sub")
+    if not user_id:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid token payload")
+    user = await db.users.find_one({"id": user_id}, {"_id": 0, "password_hash": 0})
+    if not user:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="User not found")
+    return user
+
+
+# ── Helpers ──────────────────────────────────────────────────────────────────
+
 def _strip_mongo(doc: dict) -> dict:
     doc.pop("_id", None)
     return doc
@@ -92,47 +127,97 @@ async def _document_or_404(document_id: str) -> dict:
     return d
 
 
-# ---- Health ----
+# ── Health ────────────────────────────────────────────────────────────────────
+
 @api.get("/")
 async def root():
     return {"app": "JurnalMap", "status": "ok"}
 
 
-# ---- Projects ----
+# ── Auth ──────────────────────────────────────────────────────────────────────
+
+@api.post("/auth/register", response_model=TokenResponse)
+async def register(payload: UserCreate):
+    """Register a new user account."""
+    username = payload.username.strip().lower()
+    if not username or len(username) < 3:
+        raise HTTPException(400, "Username must be at least 3 characters")
+    if len(payload.password) < 4:
+        raise HTTPException(400, "Password must be at least 4 characters")
+
+    existing = await db.users.find_one({"username": username})
+    if existing:
+        raise HTTPException(409, "Username already taken")
+
+    user_id = new_uid()
+    hashed = hash_password(payload.password)
+    user_doc = {
+        "id": user_id,
+        "username": username,
+        "email": (payload.email or "").strip() or None,
+        "is_admin": False,
+        "password_hash": hashed,
+        "created_at": utcnow_iso(),
+    }
+    await db.users.insert_one(user_doc)
+
+    token = create_access_token(user_id, username)
+    user = User(**{k: v for k, v in user_doc.items() if k != "password_hash"})
+    return TokenResponse(access_token=token, user=user)
+
+
+@api.post("/auth/login", response_model=TokenResponse)
+async def login(payload: UserLogin):
+    """Login with username and password, returns JWT token."""
+    username = payload.username.strip().lower()
+    user_doc = await db.users.find_one({"username": username})
+    if not user_doc or not verify_password(payload.password, user_doc.get("password_hash", "")):
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid username or password")
+
+    token = create_access_token(user_doc["id"], username)
+    user = User(**{k: v for k, v in user_doc.items() if k != "password_hash"})
+    return TokenResponse(access_token=token, user=user)
+
+
+@api.get("/auth/me", response_model=User)
+async def me(current_user: dict = Depends(get_current_user)):
+    """Return the currently authenticated user."""
+    return User(**current_user)
+
+
+# ── Projects ──────────────────────────────────────────────────────────────────
+
 @api.post("/projects", response_model=Project)
-async def create_project(payload: ProjectCreate):
+async def create_project(payload: ProjectCreate, _: dict = Depends(get_current_user)):
     p = Project(name=payload.name.strip() or "Untitled project", description=payload.description.strip())
     await db.projects.insert_one(p.model_dump())
     return p
 
 
 @api.get("/projects", response_model=List[Project])
-async def list_projects():
+async def list_projects(_: dict = Depends(get_current_user)):
     rows = await db.projects.find({}, {"_id": 0}).sort("created_at", -1).to_list(500)
-    # attach document_count
     for r in rows:
         r["document_count"] = await db.documents.count_documents({"project_id": r["id"]})
     return [Project(**r) for r in rows]
 
 
 @api.get("/projects/{project_id}", response_model=Project)
-async def get_project(project_id: str):
+async def get_project(project_id: str, _: dict = Depends(get_current_user)):
     p = await _project_or_404(project_id)
     p["document_count"] = await db.documents.count_documents({"project_id": project_id})
     return Project(**p)
 
 
 @api.delete("/projects/{project_id}")
-async def delete_project(project_id: str):
+async def delete_project(project_id: str, _: dict = Depends(get_current_user)):
     await _project_or_404(project_id)
-    # cascade: documents, sentences, claims
     docs = await db.documents.find({"project_id": project_id}, {"_id": 0, "id": 1}).to_list(1000)
     doc_ids = [d["id"] for d in docs]
     if doc_ids:
         await db.sentences.delete_many({"document_id": {"$in": doc_ids}})
         await db.claims.delete_many({"document_id": {"$in": doc_ids}})
         await db.matrix_cache.delete_many({"document_id": {"$in": doc_ids}})
-        # remove files
         for did in doc_ids:
             fp = UPLOAD_DIR / f"{did}.pdf"
             if fp.exists():
@@ -140,6 +225,8 @@ async def delete_project(project_id: str):
                     fp.unlink()
                 except OSError:
                     pass
+            app_cache.invalidate_bm25(did)
+    app_cache.invalidate_outlier(project_id)
     await db.documents.delete_many({"project_id": project_id})
     await db.workspace_outlines.delete_many({"project_id": project_id})
     await db.workspace_contents.delete_many({"project_id": project_id})
@@ -148,59 +235,81 @@ async def delete_project(project_id: str):
     return {"deleted": True}
 
 
-# ---- Documents ----
+# ── Documents ─────────────────────────────────────────────────────────────────
+
 @api.get("/projects/{project_id}/documents", response_model=List[DocumentMeta])
-async def list_documents(project_id: str):
+async def list_documents(project_id: str, _: dict = Depends(get_current_user)):
     await _project_or_404(project_id)
     rows = await db.documents.find({"project_id": project_id}, {"_id": 0}).sort("uploaded_at", -1).to_list(500)
     return [DocumentMeta(**r) for r in rows]
 
 
-@api.post("/projects/{project_id}/documents", response_model=DocumentMeta)
-async def upload_document(
+@api.post("/projects/{project_id}/documents", response_model=List[DocumentMeta])
+async def upload_documents(
     project_id: str,
     background_tasks: BackgroundTasks,
-    file: UploadFile = File(...),
+    files: List[UploadFile] = File(...),
+    _: dict = Depends(get_current_user),
 ):
+    """Upload up to 5 PDF files to a project. All are processed asynchronously."""
     await _project_or_404(project_id)
-    if not file.filename or not file.filename.lower().endswith(".pdf"):
-        raise HTTPException(400, "Only PDF files are accepted")
 
-    doc_id = new_uid()
-    dest = UPLOAD_DIR / f"{doc_id}.pdf"
-    async with aiofiles.open(dest, "wb") as out:
-        while True:
-            chunk = await file.read(1 << 20)
-            if not chunk:
-                break
-            await out.write(chunk)
+    if len(files) > MAX_FILES_PER_UPLOAD:
+        raise HTTPException(400, f"Maximum {MAX_FILES_PER_UPLOAD} files per upload")
 
-    meta = DocumentMeta(id=doc_id, project_id=project_id, filename=file.filename, status="processing")
-    await db.documents.insert_one(meta.model_dump())
-
+    results: List[DocumentMeta] = []
     settings = await _load_settings()
     model_id = settings.get("default_model") or default_model()
     provider, model_id = split_provider_model(model_id, settings)
-    background_tasks.add_task(
-        process_document,
-        db,
-        doc_id,
-        str(dest),
-        user_settings=settings,
-        provider=provider,
-        model=model_id,
-    )
-    return meta
+
+    for file in files:
+        if not file.filename or not file.filename.lower().endswith(".pdf"):
+            raise HTTPException(400, f"Only PDF files are accepted (got: {file.filename!r})")
+
+        doc_id = new_uid()
+        dest = UPLOAD_DIR / f"{doc_id}.pdf"
+
+        # Write file with size guard
+        written = 0
+        async with aiofiles.open(dest, "wb") as out:
+            while True:
+                chunk = await file.read(1 << 20)  # 1 MB chunks
+                if not chunk:
+                    break
+                written += len(chunk)
+                if written > MAX_UPLOAD_SIZE_BYTES:
+                    await out.close()
+                    dest.unlink(missing_ok=True)
+                    raise HTTPException(413, f"File '{file.filename}' exceeds {MAX_UPLOAD_SIZE_MB} MB limit")
+                await out.write(chunk)
+
+        meta = DocumentMeta(id=doc_id, project_id=project_id, filename=file.filename, status="processing")
+        await db.documents.insert_one(meta.model_dump())
+
+        background_tasks.add_task(
+            process_document,
+            db,
+            doc_id,
+            str(dest),
+            user_settings=settings,
+            provider=provider,
+            model=model_id,
+        )
+        results.append(meta)
+
+    # Invalidate outlier cache for this project since new docs are coming
+    app_cache.invalidate_outlier(project_id)
+    return results
 
 
 @api.get("/documents/{document_id}", response_model=DocumentMeta)
-async def get_document(document_id: str):
+async def get_document(document_id: str, _: dict = Depends(get_current_user)):
     d = await _document_or_404(document_id)
     return DocumentMeta(**d)
 
 
 @api.patch("/documents/{document_id}", response_model=DocumentMeta)
-async def update_document(document_id: str, payload: DocumentTitleUpdate):
+async def update_document(document_id: str, payload: DocumentTitleUpdate, _: dict = Depends(get_current_user)):
     """Update editable document fields. Currently: title only."""
     d = await _document_or_404(document_id)
     new_title = (payload.title or "").strip()
@@ -209,15 +318,13 @@ async def update_document(document_id: str, payload: DocumentTitleUpdate):
     if len(new_title) > 500:
         new_title = new_title[:500]
     await db.documents.update_one({"id": document_id}, {"$set": {"title": new_title}})
-    # Also refresh the cached title on any matrix cache rows for this doc so the
-    # comparison table reflects the new label without re-running the LLM.
     await db.matrix_cache.update_many({"document_id": document_id}, {"$set": {"title": new_title}})
     d["title"] = new_title
     return DocumentMeta(**d)
 
 
 @api.delete("/documents/{document_id}")
-async def delete_document(document_id: str):
+async def delete_document(document_id: str, _: dict = Depends(get_current_user)):
     d = await _document_or_404(document_id)
     await db.sentences.delete_many({"document_id": document_id})
     await db.claims.delete_many({"document_id": document_id})
@@ -229,11 +336,12 @@ async def delete_document(document_id: str):
             fp.unlink()
         except OSError:
             pass
+    app_cache.invalidate_bm25(document_id)
     return {"deleted": True, "id": d["id"]}
 
 
 @api.get("/documents/{document_id}/pdf")
-async def serve_pdf(document_id: str):
+async def serve_pdf(document_id: str, _: dict = Depends(get_current_user)):
     await _document_or_404(document_id)
     fp = UPLOAD_DIR / f"{document_id}.pdf"
     if not fp.exists():
@@ -250,7 +358,7 @@ async def _load_settings() -> dict:
 
 
 def _models_for(settings: dict) -> list[dict]:
-    """Return the list of models the user can pick. Always include Emergent defaults."""
+    """Return the list of models the user can pick."""
     models = []
     if emergent_key():
         models += [
@@ -292,9 +400,10 @@ def _mask(value: str | None) -> str:
     return value[:4] + "***" + value[-4:]
 
 
-# ---- Settings ----
+# ── Settings ──────────────────────────────────────────────────────────────────
+
 @api.get("/settings")
-async def get_settings():
+async def get_settings(_: dict = Depends(get_current_user)):
     s = await _load_settings()
     return {
         "theme": s.get("theme", "light"),
@@ -303,14 +412,12 @@ async def get_settings():
         "output_language": s.get("output_language", "en"),
         "ui_language": s.get("ui_language", "id"),
         "default_model": s.get("default_model") or default_model(),
-        # masked keys for display
         "gemini_key_masked": _mask(s.get("gemini_key")),
         "openai_key_masked": _mask(s.get("openai_key")),
         "anthropic_key_masked": _mask(s.get("anthropic_key")),
         "has_gemini_key": bool(s.get("gemini_key")),
         "has_openai_key": bool(s.get("openai_key")),
         "has_anthropic_key": bool(s.get("anthropic_key")),
-        # local endpoint
         "local_endpoint": s.get("local_endpoint", ""),
         "local_api_key_masked": _mask(s.get("local_api_key")) if s.get("local_api_key") and s.get("local_api_key") != "ollama" else "",
         "local_model": s.get("local_model", ""),
@@ -322,7 +429,7 @@ async def get_settings():
 
 
 @api.put("/settings")
-async def update_settings(payload: dict = Body(...)):
+async def update_settings(payload: dict = Body(...), _: dict = Depends(get_current_user)):
     s = await _load_settings()
     for k in (
         "theme", "persona_id", "persona_custom",
@@ -337,11 +444,13 @@ async def update_settings(payload: dict = Body(...)):
             s[k] = v
     s["id"] = "singleton"
     await db.settings.update_one({"id": "singleton"}, {"$set": s}, upsert=True)
-    return await get_settings()
+    return await get_settings(_)
 
+
+# ── Summary ───────────────────────────────────────────────────────────────────
 
 @api.get("/documents/{document_id}/summary")
-async def get_summary(document_id: str):
+async def get_summary(document_id: str, _: dict = Depends(get_current_user)):
     d = await _document_or_404(document_id)
     claims = await db.claims.find({"document_id": document_id}, {"_id": 0}).sort("idx", 1).to_list(50)
     return {
@@ -360,7 +469,7 @@ async def get_summary(document_id: str):
 
 
 @api.get("/documents/{document_id}/status")
-async def get_status(document_id: str):
+async def get_status(document_id: str, _: dict = Depends(get_current_user)):
     """Status endpoint that returns processing state + structured summary when ready."""
     d = await _document_or_404(document_id)
     claims = await db.claims.find({"document_id": document_id}, {"_id": 0}).sort("idx", 1).to_list(50)
@@ -381,11 +490,10 @@ async def get_status(document_id: str):
 
 
 @api.post("/documents/{document_id}/summarize")
-async def resummarize(document_id: str, model: Optional[str] = None, payload: dict = Body(default={})):
-    """Regenerate summary with chosen model. Body may override persona for this single call."""
+async def resummarize(document_id: str, model: Optional[str] = None, payload: dict = Body(default={}), _: dict = Depends(get_current_user)):
+    """Regenerate summary with chosen model."""
     await _document_or_404(document_id)
     settings = await _load_settings()
-    # allow persona override for this single call
     if isinstance(payload, dict) and payload.get("persona_id"):
         settings = {**settings, "persona_id": payload["persona_id"]}
         if "persona_custom" in payload:
@@ -405,12 +513,13 @@ async def resummarize(document_id: str, model: Optional[str] = None, payload: di
             status_code=502,
             detail=f"Model '{model_id}' returned malformed JSON. Please try another model. ({e})",
         )
-    return await get_summary(document_id)
+    return await get_summary(document_id, _)
 
 
-# ---- Evidence ----
+# ── Evidence ──────────────────────────────────────────────────────────────────
+
 @api.post("/claims/{claim_id}/evidence", response_model=EvidenceResponse)
-async def evidence_for_claim(claim_id: str):
+async def evidence_for_claim(claim_id: str, _: dict = Depends(get_current_user)):
     claim = await db.claims.find_one({"id": claim_id}, {"_id": 0})
     if not claim:
         raise HTTPException(404, "Claim not found")
@@ -429,8 +538,8 @@ async def evidence_for_claim(claim_id: str):
 
 
 @api.post("/documents/{document_id}/section-evidence")
-async def evidence_for_section(document_id: str, payload: dict = Body(...)):
-    """Find evidence in a doc for arbitrary text (used by section-click in SummaryPanel)."""
+async def evidence_for_section(document_id: str, payload: dict = Body(...), _: dict = Depends(get_current_user)):
+    """Find evidence in a doc for arbitrary text."""
     await _document_or_404(document_id)
     text = (payload.get("text") or "").strip()
     if not text:
@@ -445,26 +554,38 @@ async def evidence_for_section(document_id: str, payload: dict = Body(...)):
     return {"text": text, "items": items}
 
 
-# ---- Outliers ----
+# ── Outliers ──────────────────────────────────────────────────────────────────
+
 @api.get("/projects/{project_id}/outliers", response_model=OutlierResponse)
-async def project_outliers(project_id: str):
+async def project_outliers(project_id: str, _: dict = Depends(get_current_user)):
     await _project_or_404(project_id)
+
+    # Check cache first
+    cached = app_cache.get_outlier(project_id)
+    if cached:
+        return OutlierResponse(**cached)
+
     docs = await db.documents.find({"project_id": project_id, "status": "ready"}, {"_id": 0}).to_list(500)
     payload = []
     for d in docs:
         sents = await db.sentences.find({"document_id": d["id"]}, {"_id": 0}).to_list(5000)
         payload.append({"id": d["id"], "title": d.get("title") or d.get("filename"), "sentences": sents})
     res = compute_outliers(payload)
+
+    # Cache the result
+    app_cache.set_outlier(project_id, res)
     return OutlierResponse(**res)
 
 
-# ---- Matrix ----
+# ── Matrix ────────────────────────────────────────────────────────────────────
+
 @api.post("/projects/{project_id}/matrix", response_model=MatrixResponse)
 async def build_matrix(
     project_id: str,
     document_ids: Optional[List[str]] = Body(default=None, embed=True),
     refresh: bool = Body(default=False, embed=True),
     method: str = Body(default="default", embed=True),
+    _: dict = Depends(get_current_user),
 ):
     await _project_or_404(project_id)
     if method not in MATRIX_METHODS:
@@ -493,7 +614,6 @@ async def build_matrix(
                 )
             except LLMJSONError as e:
                 raise HTTPException(502, f"Model returned malformed JSON for matrix ({e})")
-            # persist
             await db.matrix_cache.update_one(
                 cache_key,
                 {"$set": {
@@ -514,9 +634,10 @@ async def build_matrix(
     return MatrixResponse(fields=fields, rows=rows)
 
 
-# ---- Ask Library ----
+# ── Ask Library ───────────────────────────────────────────────────────────────
+
 @api.post("/projects/{project_id}/ask", response_model=AskResponse)
-async def ask_library(project_id: str, payload: AskRequest, model: Optional[str] = None):
+async def ask_library(project_id: str, payload: AskRequest, model: Optional[str] = None, _: dict = Depends(get_current_user)):
     await _project_or_404(project_id)
     if not payload.question.strip():
         raise HTTPException(400, "question must not be empty")
@@ -542,12 +663,10 @@ async def ask_library(project_id: str, payload: AskRequest, model: Optional[str]
     )
 
 
-
-# ---- Check & Fix (verifikasi teks dari AI lain) ----
-# (sentence-detail endpoint + /api/projects/{id}/check)
+# ── Check & Fix ───────────────────────────────────────────────────────────────
 
 @api.get("/documents/{document_id}/sentence/{sentence_id}")
-async def get_sentence_detail(document_id: str, sentence_id: str):
+async def get_sentence_detail(document_id: str, sentence_id: str, _: dict = Depends(get_current_user)):
     d = await _document_or_404(document_id)
     s = await db.sentences.find_one({"id": sentence_id, "document_id": document_id}, {"_id": 0})
     if not s:
@@ -571,7 +690,7 @@ async def get_sentence_detail(document_id: str, sentence_id: str):
 
 
 @api.post("/projects/{project_id}/check")
-async def check_fix(project_id: str, payload: dict = Body(...)):
+async def check_fix(project_id: str, payload: dict = Body(...), _: dict = Depends(get_current_user)):
     await _project_or_404(project_id)
     text = (payload.get("text") or "").strip()
     if not text:
@@ -602,7 +721,6 @@ async def check_fix(project_id: str, payload: dict = Body(...)):
         citation_format=citation_format,
     )
 
-    # Persist last run (best-effort, single per project)
     await db.check_runs.update_one(
         {"project_id": project_id},
         {"$set": {
@@ -630,7 +748,7 @@ async def check_fix(project_id: str, payload: dict = Body(...)):
 
 
 @api.get("/projects/{project_id}/check")
-async def get_last_check(project_id: str):
+async def get_last_check(project_id: str, _: dict = Depends(get_current_user)):
     await _project_or_404(project_id)
     doc = await db.check_runs.find_one({"project_id": project_id}, {"_id": 0})
     if not doc:
@@ -640,8 +758,8 @@ async def get_last_check(project_id: str):
 
 
 @api.post("/settings/test-api-key")
-async def settings_test_api_key(payload: dict = Body(...)):
-    """Smoke-test a user-provided API key by issuing a single tiny generation."""
+async def settings_test_api_key(payload: dict = Body(...), _: dict = Depends(get_current_user)):
+    """Smoke-test a user-provided API key."""
     provider = (payload.get("provider") or "").lower().strip()
     api_key = (payload.get("api_key") or "").strip()
     model = (payload.get("model") or "").strip()
@@ -656,10 +774,7 @@ async def settings_test_api_key(payload: dict = Body(...)):
         "anthropic": "claude-haiku-4-5",
     }
 
-    # Build a one-off settings dict so resolve_key prefers the provided key
-    fake_settings = {
-        f"{provider}_key": api_key,
-    }
+    fake_settings = {f"{provider}_key": api_key}
     if provider == "local":
         endpoint = (payload.get("endpoint") or "").strip()
         if not endpoint:
@@ -698,9 +813,16 @@ async def settings_test_api_key(payload: dict = Body(...)):
         }
 
 
+# ── Cache stats (debug endpoint) ─────────────────────────────────────────────
+
+@api.get("/cache/stats")
+async def cache_stats(_: dict = Depends(get_current_user)):
+    """Return in-memory cache statistics for debugging."""
+    return app_cache.cache_stats()
 
 
-# ---- Mount ----
+# ── Mount & Middleware ────────────────────────────────────────────────────────
+
 app.include_router(api)
 
 app.add_middleware(
@@ -710,6 +832,39 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+
+# ── Startup: Seed default admin ───────────────────────────────────────────────
+
+@app.on_event("startup")
+async def seed_admin():
+    """Create default admin account if it doesn't exist."""
+    admin_username = os.environ.get("ADMIN_USERNAME", "admin").lower()
+    admin_password = os.environ.get("ADMIN_PASSWORD", "admin")
+
+    existing = await db.users.find_one({"username": admin_username})
+    if not existing:
+        user_id = new_uid()
+        hashed = hash_password(admin_password)
+        await db.users.insert_one({
+            "id": user_id,
+            "username": admin_username,
+            "email": None,
+            "is_admin": True,
+            "password_hash": hashed,
+            "created_at": utcnow_iso(),
+        })
+        logger.info("Default admin account '%s' created.", admin_username)
+    else:
+        logger.info("Admin account '%s' already exists.", admin_username)
+
+    # Ensure MongoDB indexes for performance
+    await db.users.create_index("username", unique=True)
+    await db.projects.create_index("created_at")
+    await db.documents.create_index([("project_id", 1), ("uploaded_at", -1)])
+    await db.documents.create_index([("project_id", 1), ("status", 1)])
+    await db.sentences.create_index([("document_id", 1), ("idx", 1)])
+    await db.claims.create_index([("document_id", 1), ("idx", 1)])
 
 
 @app.on_event("shutdown")
