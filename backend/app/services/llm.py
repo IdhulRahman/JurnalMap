@@ -293,3 +293,74 @@ def split_provider_model(model_id: str, user_settings: Optional[dict] = None) ->
     if m.startswith("gpt") or m.startswith("o1") or m.startswith("o3") or m.startswith("o4"):
         return "openai", model_id
     return default_provider(), model_id
+
+
+async def list_available_models(provider: str, api_key: str) -> list[dict]:
+    """Dynamically list text-generation models supported by the provider key.
+
+    If the call fails or the provider does not support listing (e.g. Anthropic),
+    returns a list of default standard models.
+    """
+    if not api_key:
+        return []
+
+    prov = provider.lower().strip()
+
+    if prov == "gemini":
+        try:
+            from google import genai
+            client = genai.Client(api_key=api_key)
+            models = []
+            for m in client.models.list():
+                if (
+                    m.supported_generation_methods and
+                    "generateContent" in m.supported_generation_methods and
+                    (m.name.startswith("models/gemini") or m.name.startswith("models/gemma"))
+                ):
+                    model_id = m.name.replace("models/", "")
+                    label = model_id.replace("-", " ").title()
+                    models.append({"id": model_id, "provider": "gemini", "label": label})
+            if models:
+                # Sort models so newest/most common come first
+                models.sort(key=lambda x: x["id"], reverse=True)
+                return models
+        except Exception:
+            pass
+        return [
+            {"id": "gemini-2.5-flash", "provider": "gemini", "label": "Gemini 2.5 Flash"},
+            {"id": "gemini-2.5-pro", "provider": "gemini", "label": "Gemini 2.5 Pro"},
+            {"id": "gemini-1.5-flash", "provider": "gemini", "label": "Gemini 1.5 Flash"},
+            {"id": "gemini-1.5-pro", "provider": "gemini", "label": "Gemini 1.5 Pro"},
+        ]
+
+    if prov == "openai":
+        try:
+            from openai import AsyncOpenAI
+            client = AsyncOpenAI(api_key=api_key)
+            res = await client.models.list()
+            models = []
+            for m in res.data:
+                if m.id.startswith(("gpt-4", "gpt-3.5", "o1", "o3")):
+                    label = m.id.replace("-", " ").title()
+                    models.append({"id": m.id, "provider": "openai", "label": label})
+            if models:
+                models.sort(key=lambda x: x["id"])
+                return models
+        except Exception:
+            pass
+        return [
+            {"id": "gpt-4o-mini", "provider": "openai", "label": "GPT-4o Mini"},
+            {"id": "gpt-4o", "provider": "openai", "label": "GPT-4o"},
+            {"id": "o1-mini", "provider": "openai", "label": "O1 Mini"},
+            {"id": "o3-mini", "provider": "openai", "label": "O3 Mini"},
+        ]
+
+    if prov == "anthropic":
+        return [
+            {"id": "claude-3-5-haiku-latest", "provider": "anthropic", "label": "Claude 3.5 Haiku"},
+            {"id": "claude-3-5-sonnet-latest", "provider": "anthropic", "label": "Claude 3.5 Sonnet"},
+            {"id": "claude-3-opus-latest", "provider": "anthropic", "label": "Claude 3 Opus"},
+        ]
+
+    return []
+

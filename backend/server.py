@@ -553,25 +553,25 @@ async def _load_settings() -> dict:
     return doc
 
 
-def _models_for(settings: dict) -> list[dict]:
+async def _models_for(settings: dict) -> list[dict]:
     """Return the list of models available to the user.
 
-    Cloud models (Gemini / OpenAI / Anthropic) are shown only when the user
-    has configured the corresponding API key in Settings.
+    Cloud models (Gemini / OpenAI / Anthropic) are listed dynamically
+    based on the user's API key.
     The admin-provided local LLM is shown when LOCAL_LLM_ENABLED=true in env.
     """
     models: list[dict] = []
+    from app.services.llm import list_available_models
 
-    # Cloud models — visible only if user has supplied a key
     if settings.get("gemini_key"):
-        models.append({"id": "gemini-2.0-flash", "provider": "gemini", "label": "Gemini 2.0 Flash"})
-        models.append({"id": "gemini-1.5-pro", "provider": "gemini", "label": "Gemini 1.5 Pro"})
+        gemini_list = await list_available_models("gemini", settings["gemini_key"])
+        models.extend(gemini_list)
     if settings.get("openai_key"):
-        models.append({"id": "gpt-4o-mini", "provider": "openai", "label": "GPT-4o Mini"})
-        models.append({"id": "gpt-4o", "provider": "openai", "label": "GPT-4o"})
+        openai_list = await list_available_models("openai", settings["openai_key"])
+        models.extend(openai_list)
     if settings.get("anthropic_key"):
-        models.append({"id": "claude-3-5-haiku-latest", "provider": "anthropic", "label": "Claude 3.5 Haiku"})
-        models.append({"id": "claude-3-5-sonnet-latest", "provider": "anthropic", "label": "Claude 3.5 Sonnet"})
+        anthropic_list = await list_available_models("anthropic", settings["anthropic_key"])
+        models.extend(anthropic_list)
 
     # Admin-provided local LLM (Ollama / vLLM)
     if os.environ.get("LOCAL_LLM_ENABLED", "false").lower() in ("1", "true", "yes"):
@@ -599,6 +599,7 @@ async def get_settings(_: dict = Depends(get_current_user)):
     s = await _load_settings()
     # Merge admin local LLM env so it shows up in available models
     s_with_local = {**s, **_local_llm_env_settings()}
+    available = await _models_for(s_with_local)
     return {
         "theme": s.get("theme", "light"),
         "persona_id": s.get("persona_id", "akademisi_ketat"),
@@ -618,7 +619,7 @@ async def get_settings(_: dict = Depends(get_current_user)):
         "has_local": bool(s.get("local_endpoint") and s.get("local_model")),
         "personas": [{"id": k, "label": v["label"]} for k, v in PERSONAS.items()] + [{"id": "custom", "label": "Custom"}],
         "matrix_methods": [{"id": k, "label": v["label"]} for k, v in MATRIX_METHODS.items()],
-        "available_models": _models_for(s_with_local),
+        "available_models": available,
     }
 
 
@@ -1035,9 +1036,9 @@ async def settings_test_api_key(payload: dict = Body(...), _: dict = Depends(get
         raise HTTPException(400, "api_key is required")
 
     default_models = {
-        "gemini": "gemini-3-flash-preview",
-        "openai": "gpt-5.4-mini",
-        "anthropic": "claude-haiku-4-5",
+        "gemini": "gemini-2.5-flash",
+        "openai": "gpt-4o-mini",
+        "anthropic": "claude-3-5-haiku-latest",
     }
 
     fake_settings = {f"{provider}_key": api_key}

@@ -97,7 +97,7 @@ export default function SettingsPage() {
     if (!keyValue.trim()) return;
 
     setKeyTestStatus((s) => ({ ...s, [keyField]: "testing" }));
-    const defaultModels = { gemini: "gemini-2.0-flash", openai: "gpt-4o-mini", anthropic: "claude-3-5-haiku-latest" };
+    const defaultModels = { gemini: "gemini-2.5-flash", openai: "gpt-4o-mini", anthropic: "claude-3-5-haiku-latest" };
     try {
       const result = await api.testApiKey({
         provider,
