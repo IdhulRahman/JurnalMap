@@ -32,19 +32,42 @@ def split_sentences(text: str) -> List[str]:
     return [p.strip() for p in parts if len(p.strip()) > 5]
 
 
-def parse_pdf(pdf_path: str | Path) -> Dict[str, Any]:
-    """Return dict: { page_count, title, sentences, quality } using Docling."""
-    pdf_path = str(pdf_path)
-    
+_converter = None
+
+
+def _get_converter() -> DocumentConverter:
+    """Lazy loader for DocumentConverter singleton to avoid re-initializing models on every parse."""
+    global _converter
+    if _converter is not None:
+        return _converter
+
     # Configure Docling to disable OCR to avoid PyTorch errors and speed up processing
     pipeline_options = PdfPipelineOptions()
     pipeline_options.do_ocr = False
 
-    converter = DocumentConverter(
+    # Auto-detect and configure CUDA device if available
+    try:
+        import torch  # type: ignore
+        if torch.cuda.is_available():
+            from docling.datamodel.accelerator_options import AcceleratorDevice, AcceleratorOptions
+            pipeline_options.accelerator_options = AcceleratorOptions(
+                device=AcceleratorDevice.CUDA
+            )
+    except Exception:
+        pass
+
+    _converter = DocumentConverter(
         format_options={
             InputFormat.PDF: PdfFormatOption(pipeline_options=pipeline_options)
         }
     )
+    return _converter
+
+
+def parse_pdf(pdf_path: str | Path) -> Dict[str, Any]:
+    """Return dict: { page_count, title, sentences, quality } using Docling."""
+    pdf_path = str(pdf_path)
+    converter = _get_converter()
     result = converter.convert(pdf_path)
     doc = result.document
 

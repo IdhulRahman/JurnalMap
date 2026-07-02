@@ -49,9 +49,11 @@ def get_model():
         return None
     try:
         from sentence_transformers import SentenceTransformer  # type: ignore
+        import torch  # type: ignore
+        device = "cuda" if torch.cuda.is_available() else "cpu"
         name = model_name()
-        logger.info("Loading sentence-transformers model '%s' ...", name)
-        _model = SentenceTransformer(name)
+        logger.info("Loading sentence-transformers model '%s' on device '%s' ...", name, device)
+        _model = SentenceTransformer(name, device=device)
         logger.info("Embedding model '%s' loaded successfully", name)
     except Exception as exc:  # noqa: BLE001
         logger.warning("Embedding model unavailable (BM25-only fallback): %s", exc)
