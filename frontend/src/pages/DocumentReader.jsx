@@ -34,7 +34,7 @@ export default function DocumentReader() {
   return (
     <div className="h-screen flex flex-col">
       <Header />
-      <div className="border-b border-[color:var(--jm-border)] bg-white">
+      <div className="border-b border-[color:var(--jm-border)] bg-[color:var(--jm-surface)]">
         <div className="mx-auto max-w-[1600px] px-6 py-3 flex items-center gap-4">
           <Link
             data-testid="back-to-project"
@@ -78,7 +78,7 @@ export default function DocumentReader() {
 
         <aside
           data-testid="right-summary-panel"
-          className="lg:col-span-5 bg-white overflow-y-auto h-[calc(100vh-64px-49px)]"
+          className="lg:col-span-5 bg-[color:var(--jm-surface)] overflow-y-auto h-[calc(100vh-64px-49px)]"
         >
           {loading || !summary ? (
             <div className="p-6 text-sm text-[color:var(--jm-text-3)] font-ui">Memuat ringkasan…</div>

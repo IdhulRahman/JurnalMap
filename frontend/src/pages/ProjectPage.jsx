@@ -114,7 +114,7 @@ export default function ProjectPage() {
   return (
     <div className="min-h-screen">
       <Header />
-      <div className="border-b border-[color:var(--jm-border)] bg-white">
+      <div className="border-b border-[color:var(--jm-border)] bg-[color:var(--jm-surface)]">
         <div className="mx-auto max-w-[1600px] px-6 py-6">
           <button
             data-testid="back-to-projects"

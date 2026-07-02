@@ -111,9 +111,9 @@ export const api = {
     http.get(`/projects/${projectId}/network`).then((r) => r.data),
 
   // ── Matrix ──────────────────────────────────────────────────
-  matrix: (projectId, documentIds = null, refresh = false, method = "default") =>
+  matrix: (projectId, documentIds = null, refresh = false, method = "default", model = null) =>
     http
-      .post(`/projects/${projectId}/matrix`, { document_ids: documentIds, refresh, method })
+      .post(`/projects/${projectId}/matrix`, { document_ids: documentIds, refresh, method, model })
       .then((r) => r.data),
 
   // ── Ask ─────────────────────────────────────────────────────

@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { Grid3x3, Loader2, Quote, RefreshCw, FileDown, FileText } from "lucide-react";
+import { Grid3x3, Loader2, Quote, RefreshCw, FileDown, FileText, Cpu } from "lucide-react";
 import { api } from "@/services/api";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
@@ -49,6 +49,13 @@ export default function MatrixView({ projectId, docs }) {
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(false);
   const [activeCell, setActiveCell] = useState(null);
+  const [selectedModel, setSelectedModel] = useState(settings?.default_model || "");
+
+  useEffect(() => {
+    if (!selectedModel && settings?.default_model) {
+      setSelectedModel(settings.default_model);
+    }
+  }, [settings?.default_model, selectedModel]);
 
   const methods = settings?.matrix_methods || [
     { id: "default", label: "Default" },
@@ -68,7 +75,7 @@ export default function MatrixView({ projectId, docs }) {
     setLoading(true);
     setActiveCell(null);
     try {
-      const r = await api.matrix(projectId, null, refresh, method);
+      const r = await api.matrix(projectId, null, refresh, method, selectedModel);
       setData(r);
       if (refresh) toast.success(t("matrix.refresh"));
     } catch (e) {
@@ -102,14 +109,38 @@ export default function MatrixView({ projectId, docs }) {
         <div className="flex items-center gap-2 text-[11px] uppercase tracking-[0.22em] font-semibold text-[color:var(--jm-text-3)]">
           <Grid3x3 className="w-3.5 h-3.5" /> {t("matrix.title")}
         </div>
-        <div className="flex items-center gap-2 ml-auto">
+        <div className="flex items-center gap-2 ml-auto flex-wrap">
+          {/* Model Selection Dropdown */}
+          <div className="text-[10px] uppercase tracking-[0.2em] font-semibold text-[color:var(--jm-text-3)] flex items-center gap-1">
+            <Cpu className="w-3.5 h-3.5" /> Model
+          </div>
+          <Select value={selectedModel} onValueChange={setSelectedModel}>
+            <SelectTrigger
+              data-testid="matrix-model-select"
+              className="h-9 text-xs bg-[var(--jm-surface)] border-2 border-[var(--jm-border-2)] text-[color:var(--jm-text)] min-w-[150px]"
+            >
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              {(settings?.available_models || []).map((m) => (
+                <SelectItem
+                  key={`${m.provider}-${m.id}-${m.label}`}
+                  data-testid={`matrix-model-option-${m.id}`}
+                  value={m.id}
+                >
+                  {m.label}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+
           <div className="text-[10px] uppercase tracking-[0.2em] font-semibold text-[color:var(--jm-text-3)]">
             {t("matrix.method")}
           </div>
           <Select value={method} onValueChange={setMethod}>
             <SelectTrigger
               data-testid="matrix-method-select"
-              className="h-9 text-xs bg-[var(--jm-surface)] border-2 border-[var(--jm-border-2)] text-[color:var(--jm-text)] min-w-[230px]"
+              className="h-9 text-xs bg-[var(--jm-surface)] border-2 border-[var(--jm-border-2)] text-[color:var(--jm-text)] min-w-[200px]"
             >
               <SelectValue />
             </SelectTrigger>

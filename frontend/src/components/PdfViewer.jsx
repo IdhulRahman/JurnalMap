@@ -50,7 +50,7 @@ export default function PdfViewer({ fileUrl, highlights = [], jumpTo = null }) {
 
   return (
     <div className="flex flex-col h-full">
-      <div className="flex items-center gap-2 px-4 py-2.5 border-b border-[color:var(--jm-border)] bg-white">
+      <div className="flex items-center gap-2 px-4 py-2.5 border-b border-[color:var(--jm-border)] bg-[color:var(--jm-surface)]">
         <button
           data-testid="pdf-prev-page"
           className="p-1.5 rounded hover:bg-[color:var(--jm-sidebar)] disabled:opacity-40"

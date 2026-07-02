@@ -885,6 +885,7 @@ async def build_matrix(
     document_ids: Optional[List[str]] = Body(default=None, embed=True),
     refresh: bool = Body(default=False, embed=True),
     method: str = Body(default="default", embed=True),
+    model: Optional[str] = Body(default=None, embed=True),
     current_user: dict = Depends(get_current_user),
 ):
     await _project_or_forbidden(project_id, current_user)
@@ -912,7 +913,8 @@ async def build_matrix(
             
             sents = await db.sentences.find({"document_id": d["id"]}, {"_id": 0}).to_list(5000)
             settings_doc = await _load_settings()
-            provider, model_id = split_provider_model(settings_doc.get("default_model") or default_model(), settings_doc)
+            selected_model = model or settings_doc.get("default_model") or default_model()
+            provider, model_id = split_provider_model(selected_model, settings_doc)
             try:
                 row = await extract_row(
                     d["id"], title, sents,
