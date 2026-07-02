@@ -1,6 +1,7 @@
 """Orchestrates the full upload-to-ready pipeline for one document."""
 from __future__ import annotations
 
+import asyncio
 import logging
 import traceback
 import uuid as _uuid
@@ -33,7 +34,7 @@ async def _embed_and_store(db, document_id: str, sentence_docs: List[Dict[str, A
     for batch_start in range(0, len(texts), _EMBED_BATCH):
         batch_texts = texts[batch_start: batch_start + _EMBED_BATCH]
         batch_ids = ids[batch_start: batch_start + _EMBED_BATCH]
-        vecs = embed_texts(batch_texts, batch_size=_EMBED_BATCH)
+        vecs = await asyncio.to_thread(embed_texts, batch_texts, batch_size=_EMBED_BATCH)
         if vecs is None:
             break  # model unavailable — stop early
         # Bulk update sentences with their embedding vectors
@@ -70,7 +71,7 @@ async def process_document_parse_only(
     Summary is built on demand via /documents/{id}/summarize.
     """
     try:
-        parsed = parse_pdf(pdf_path)
+        parsed = await asyncio.to_thread(parse_pdf, pdf_path)
         sentences = parsed["sentences"]
 
         # Clear any previous sentences in case of a retry

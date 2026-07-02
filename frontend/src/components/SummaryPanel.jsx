@@ -10,6 +10,7 @@ import {
   Cpu,
   Sparkles,
   Languages,
+  Layers,
 } from "lucide-react";
 import EvidenceBadge from "@/components/EvidenceBadge";
 import { CATEGORY_LABEL, TIER_META } from "@/lib/tiers";

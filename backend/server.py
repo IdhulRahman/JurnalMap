@@ -11,6 +11,7 @@ from dotenv import load_dotenv
 ROOT_DIR = Path(__file__).parent
 load_dotenv(ROOT_DIR / ".env")
 
+import asyncio
 import logging
 import uuid
 from typing import List, Optional
@@ -987,7 +988,7 @@ async def project_network(project_id: str, current_user: dict = Depends(get_curr
     for d in docs:
         sents = await db.sentences.find({"document_id": d["id"]}, {"_id": 0}).to_list(5000)
         payload.append({"id": d["id"], "title": d.get("title") or d.get("filename"), "sentences": sents})
-    res = compute_network(payload)
+    res = await asyncio.to_thread(compute_network, payload)
     return res
 
 
