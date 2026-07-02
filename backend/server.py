@@ -907,7 +907,7 @@ async def build_matrix(
             row = {"document_id": d["id"], "title": title, "cells": cached["cells"]}
         else:
             if need_spacing:
-                await asyncio.sleep(1.5)  # Pace requests to prevent hitting RPM limits
+                await asyncio.sleep(3.5)  # Pace requests to prevent hitting RPM limits (3.5s is safe for free tiers)
             need_spacing = True
             
             sents = await db.sentences.find({"document_id": d["id"]}, {"_id": 0}).to_list(5000)
