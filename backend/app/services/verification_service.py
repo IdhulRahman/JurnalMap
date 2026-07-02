@@ -15,7 +15,7 @@ import re
 import uuid
 from typing import Any, Dict, List, Optional, Tuple
 
-from .retrieval import build_bm25, top_k, tokenize
+from .retrieval import build_bm25, rrf_top_k, tokenize
 
 
 # Tunable thresholds. Score is computed as bm25_score / max(query_tokens,1).
@@ -211,7 +211,7 @@ def check_text(
             })
             continue
 
-        ranked = top_k(bm25, sentences_only, qtext, k=3)
+        ranked = rrf_top_k(bm25, sentences_only, qtext, k=3)
         if not ranked:
             annotated_units.append({
                 "unit_id": unit_id,

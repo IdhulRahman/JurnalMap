@@ -4,7 +4,7 @@ from __future__ import annotations
 from typing import List, Dict, Any
 
 from .llm import generate_json, persona_prefix
-from .retrieval import build_bm25, top_k
+from .retrieval import build_bm25, rrf_top_k
 
 
 BASE_SYSTEM = (
@@ -31,7 +31,7 @@ async def find_evidence(
     if not sentences:
         return []
     bm25 = build_bm25(sentences)
-    top = top_k(bm25, sentences, claim_text, k=k)
+    top = rrf_top_k(bm25, sentences, claim_text, k=k)
     if not top:
         return []
 

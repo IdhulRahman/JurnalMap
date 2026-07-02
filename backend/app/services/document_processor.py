@@ -4,12 +4,59 @@ from __future__ import annotations
 import logging
 import traceback
 import uuid as _uuid
-from typing import Any, Dict, Optional
+from typing import Any, Dict, List, Optional
 
 from .pdf_parser import parse_pdf
 from .summary_service import summarise_document
+from .embedding import embed_texts, is_enabled as embedding_enabled
+from .cache import invalidate_embeddings
 
 logger = logging.getLogger(__name__)
+
+_EMBED_BATCH = 128  # sentences per embedding batch
+
+
+async def _embed_and_store(db, document_id: str, sentence_docs: List[Dict[str, Any]]) -> int:
+    """Generate embeddings for sentence_docs and persist them to db.sentences.
+
+    Works in batches of _EMBED_BATCH to avoid OOM on large documents.
+    Returns the number of sentences successfully embedded.
+    Silently skips if the embedding model is unavailable.
+    """
+    if not embedding_enabled() or not sentence_docs:
+        return 0
+
+    texts = [s["text"] for s in sentence_docs]
+    ids = [s["id"] for s in sentence_docs]
+
+    embedded_count = 0
+    for batch_start in range(0, len(texts), _EMBED_BATCH):
+        batch_texts = texts[batch_start: batch_start + _EMBED_BATCH]
+        batch_ids = ids[batch_start: batch_start + _EMBED_BATCH]
+        vecs = embed_texts(batch_texts, batch_size=_EMBED_BATCH)
+        if vecs is None:
+            break  # model unavailable — stop early
+        # Bulk update sentences with their embedding vectors
+        from motor.motor_asyncio import AsyncIOMotorDatabase  # type: ignore  # noqa
+        from pymongo import UpdateOne  # type: ignore
+        ops = [
+            UpdateOne(
+                {"id": sid},
+                {"$set": {"embedding": vec.tolist()}},
+            )
+            for sid, vec in zip(batch_ids, vecs)
+        ]
+        await db.sentences.bulk_write(ops, ordered=False)
+        embedded_count += len(batch_ids)
+
+    # Invalidate embedding cache so next query re-loads from DB
+    invalidate_embeddings(document_id)
+    logger.info(
+        "Embedded %d/%d sentences for document %s",
+        embedded_count, len(sentence_docs), document_id,
+    )
+    return embedded_count
+
 
 
 async def process_document_parse_only(
@@ -39,6 +86,11 @@ async def process_document_parse_only(
 
         if sentence_docs:
             await db.sentences.insert_many(sentence_docs)
+            # Generate and persist embeddings (non-blocking fallback if unavailable)
+            try:
+                await _embed_and_store(db, document_id, sentence_docs)
+            except Exception as emb_err:  # noqa: BLE001
+                logger.warning("Embedding generation skipped for %s: %s", document_id, emb_err)
 
         title = parsed.get("title") or ""
         update_set = {

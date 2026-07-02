@@ -5,7 +5,7 @@ from typing import List, Dict, Any
 import uuid
 
 from .llm import generate_json, persona_prefix
-from .retrieval import build_bm25, top_k
+from .retrieval import build_bm25, rrf_top_k
 
 
 BASE_SYSTEM = (
@@ -33,7 +33,7 @@ async def answer_question(
         if not d["sentences"]:
             continue
         bm25 = build_bm25(d["sentences"])
-        for sent, score in top_k(bm25, d["sentences"], question, k=top_per_doc):
+        for sent, score in rrf_top_k(bm25, d["sentences"], question, k=top_per_doc):
             gathered.append({
                 "doc_id": d["id"],
                 "doc_title": d["title"] or "Untitled",

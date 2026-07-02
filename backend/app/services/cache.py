@@ -4,18 +4,23 @@ Uses TTLCache from cachetools to avoid rebuilding BM25 indexes on every request.
 
 Cache keys:
   bm25:<document_id>   → BM25Okapi index object (TTL: 30 min)
+  emb:<document_id>    → np.ndarray embedding matrix of shape (N, dim) (TTL: 2 h)
 """
 from __future__ import annotations
 
 import logging
 from typing import Any, Optional
 
+import numpy as np
 from cachetools import TTLCache
 
 logger = logging.getLogger(__name__)
 
 # BM25 indexes — 30 min TTL, max 200 documents cached
 _BM25_CACHE: TTLCache = TTLCache(maxsize=200, ttl=1800)
+
+# Embedding matrices — 2 hour TTL, max 100 documents cached
+_EMBED_CACHE: TTLCache = TTLCache(maxsize=100, ttl=7200)
 
 
 # ── BM25 ────────────────------------------------------------------------------
@@ -37,9 +42,33 @@ def invalidate_bm25(doc_id: str) -> None:
     logger.debug("BM25 cache invalidated for doc %s")
 
 
+# ── Embedding ─────────────────────────────────────────────────────────────────
+
+def get_embeddings(doc_id: str) -> Optional[np.ndarray]:
+    """Return cached embedding matrix (N x dim) for a document, or None."""
+    return _EMBED_CACHE.get(doc_id)
+
+
+def set_embeddings(doc_id: str, matrix: np.ndarray) -> None:
+    """Store an embedding matrix for a document in the cache."""
+    _EMBED_CACHE[doc_id] = matrix
+    logger.debug("Embeddings cached for doc %s (matrix shape %s)", doc_id, matrix.shape)
+
+
+def invalidate_embeddings(doc_id: str) -> None:
+    """Remove cached embeddings for a document (call on reindex or deletion)."""
+    _EMBED_CACHE.pop(doc_id, None)
+    logger.debug("Embedding cache invalidated for doc %s", doc_id)
+
+
+# ── Stats ──────────────────────────────────────────────────────────────────────
+
 def cache_stats() -> dict:
     """Return current cache stats for monitoring/debugging."""
     return {
         "bm25_entries": len(_BM25_CACHE),
         "bm25_maxsize": _BM25_CACHE.maxsize,
+        "embed_entries": len(_EMBED_CACHE),
+        "embed_maxsize": _EMBED_CACHE.maxsize,
     }
+

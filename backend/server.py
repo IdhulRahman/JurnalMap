@@ -59,7 +59,7 @@ from app.models.user import (
     ForgotPasswordRequest,
     ChangePasswordRequest,
 )
-from app.services.document_processor import process_document, process_document_parse_only, regenerate_summary
+from app.services.document_processor import process_document, process_document_parse_only, regenerate_summary, _embed_and_store
 from app.services.evidence_service import find_evidence
 # outlier_service removed — use NetworkGraph instead
 from app.services.network_service import compute_network
@@ -527,6 +527,30 @@ async def retry_document(document_id: str, current_user: dict = Depends(get_curr
     updated = await db.documents.find_one({"id": document_id}, {"_id": 0})
     return DocumentMeta(**updated)
 
+@api.post("/documents/{document_id}/reindex")
+async def reindex_document_embeddings(document_id: str, current_user: dict = Depends(get_current_user)):
+    """Regenerate and store sentence embeddings for an existing document.
+
+    Use this for documents uploaded before hybrid retrieval was enabled.
+    The PDF is NOT re-parsed. Only the embedding field on each sentence is updated.
+    Returns how many sentences were successfully embedded.
+    """
+    await _document_or_forbidden(document_id, current_user)
+    sentences = await db.sentences.find(
+        {"document_id": document_id}, {"_id": 0}
+    ).sort("idx", 1).to_list(10000)
+    if not sentences:
+        raise HTTPException(404, "No sentences found for this document. Make sure it has been parsed.")
+    try:
+        embedded = await _embed_and_store(db, document_id, sentences)
+    except Exception as exc:
+        raise HTTPException(500, f"Embedding failed: {exc}") from exc
+    return {
+        "document_id": document_id,
+        "total_sentences": len(sentences),
+        "embedded_sentences": embedded,
+        "status": "ok" if embedded > 0 else "embedding_unavailable",
+    }
 
 @api.get("/projects/{project_id}/queue")
 async def get_project_queue(project_id: str, current_user: dict = Depends(get_current_user)):
@@ -585,6 +609,7 @@ async def delete_document(document_id: str, current_user: dict = Depends(get_cur
         except OSError:
             pass
     app_cache.invalidate_bm25(document_id)
+    app_cache.invalidate_embeddings(document_id)
     return {"deleted": True, "id": d["id"]}
 
 

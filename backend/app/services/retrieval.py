@@ -1,9 +1,10 @@
-"""Lightweight BM25 retrieval over sentences (in-memory per request)."""
+"""Lightweight BM25 retrieval + Hybrid RRF retrieval over sentences (in-memory per request)."""
 from __future__ import annotations
 
 import re
-from typing import List, Tuple, Dict, Any
+from typing import List, Tuple, Dict, Any, Optional
 
+import numpy as np
 from rank_bm25 import BM25Okapi
 
 
@@ -56,3 +57,107 @@ def cosine(a: Dict[str, float], b: Dict[str, float]) -> float:
     if na == 0 or nb == 0:
         return 0.0
     return dot / (na * nb)
+
+
+# ── Hybrid Retrieval (Semantic + RRF) ─────────────────────────────────────────
+
+def semantic_top_k(
+    query: str,
+    sentences: List[Dict[str, Any]],
+    k: int = 5,
+) -> List[Tuple[Dict[str, Any], float]]:
+    """Semantic retrieval using pre-stored sentence embeddings (cosine similarity).
+
+    Sentences must have an 'embedding' field (list[float]) stored from indexing.
+    Returns list of (sentence_dict, cosine_score) sorted by score descending.
+    Falls back to empty list if embeddings are unavailable.
+    """
+    from .embedding import embed_one  # lazy import to avoid circular deps
+
+    if not sentences:
+        return []
+
+    # Filter only sentences that have stored embeddings
+    indexed = [(i, s) for i, s in enumerate(sentences) if s.get("embedding")]
+    if not indexed:
+        return []
+
+    query_vec = embed_one(query)
+    if query_vec is None:
+        return []
+
+    # Stack stored embeddings into matrix
+    try:
+        idxs, sents = zip(*indexed)
+        matrix = np.array([s["embedding"] for s in sents], dtype=np.float32)
+        # L2 normalise query (stored embeddings already normalised at index time)
+        norm = np.linalg.norm(query_vec)
+        if norm > 0:
+            query_vec = query_vec / norm
+        scores = matrix @ query_vec  # dot product == cosine for normalised vecs
+    except Exception:
+        return []
+
+    top_positions = sorted(range(len(scores)), key=lambda i: scores[i], reverse=True)[:k]
+    return [(sentences[idxs[p]], float(scores[p])) for p in top_positions if scores[p] > 0]
+
+
+def rrf_top_k(
+    bm25: BM25Okapi,
+    sentences: List[Dict[str, Any]],
+    query: str,
+    k: int = 5,
+    rrf_k: int = 60,
+    bm25_weight: float = 0.5,
+    semantic_weight: float = 0.5,
+) -> List[Tuple[Dict[str, Any], float]]:
+    """Hybrid retrieval: BM25 + Semantic Search fused with Reciprocal Rank Fusion (RRF).
+
+    RRF score for each sentence:
+        score = bm25_weight / (rrf_k + rank_bm25)
+              + semantic_weight / (rrf_k + rank_semantic)
+
+    Falls back transparently to BM25-only when:
+    - The embedding model is not available, OR
+    - No sentence in the corpus has a stored 'embedding' field.
+    """
+    if not sentences:
+        return []
+
+    # ── BM25 ranking ──────────────────────────────────────────────────────────
+    bm25_scores = bm25.get_scores(tokenize(query))
+    bm25_order = sorted(range(len(bm25_scores)), key=lambda i: bm25_scores[i], reverse=True)
+    bm25_rank = {idx: rank for rank, idx in enumerate(bm25_order)}  # idx → 0-based rank
+
+    # ── Semantic ranking (optional) ───────────────────────────────────────────
+    has_embeddings = any(s.get("embedding") for s in sentences)
+    semantic_rank: Dict[int, int] = {}
+
+    if has_embeddings:
+        sem_results = semantic_top_k(query, sentences, k=len(sentences))
+        if sem_results:
+            # Map sentence id → rank
+            id_to_idx = {s.get("id", i): i for i, s in enumerate(sentences)}
+            for rank, (sent, _score) in enumerate(sem_results):
+                sent_idx = id_to_idx.get(sent.get("id"), -1)
+                if sent_idx >= 0:
+                    semantic_rank[sent_idx] = rank
+
+    # ── RRF Fusion ────────────────────────────────────────────────────────────
+    rrf_scores: Dict[int, float] = {}
+    for i in range(len(sentences)):
+        bm25_r = bm25_rank.get(i, len(sentences))  # unranked → worst rank
+        score = bm25_weight / (rrf_k + bm25_r)
+        if semantic_rank:
+            sem_r = semantic_rank.get(i, len(sentences))  # unranked → worst rank
+            score += semantic_weight / (rrf_k + sem_r)
+        rrf_scores[i] = score
+
+    top_idxs = sorted(rrf_scores.keys(), key=lambda i: rrf_scores[i], reverse=True)[:k]
+    # Only return sentences with positive BM25 score OR positive semantic score
+    results = []
+    for i in top_idxs:
+        if bm25_scores[i] > 0 or i in semantic_rank:
+            results.append((sentences[i], rrf_scores[i]))
+    return results
+

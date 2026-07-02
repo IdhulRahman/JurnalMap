@@ -4,8 +4,8 @@ Computes edges between documents using a weighted composite score:
   composite = 0.5 * semantic + 0.3 * keyword_jaccard + 0.2 * topic_match
 
 - semantic: cosine similarity between document embeddings. Uses
-  sentence-transformers if EMBEDDING_ENABLED is truthy and the model can be
-  loaded, otherwise falls back to TF cosine (retrieval.doc_vector).
+  sentence-transformers via shared embedding.py singleton if available,
+  otherwise falls back to TF cosine (retrieval.doc_vector).
 - keyword_jaccard: Jaccard similarity over the top-N keywords per document.
 - topic_match: overlap of the top-5 dominant keywords per document.
 """
@@ -13,9 +13,9 @@ from __future__ import annotations
 
 import logging
 import math
-import os
 from typing import Any, Dict, List, Optional
 
+from .embedding import get_model, embed_texts, model_name as _embedding_model_name
 from .retrieval import doc_vector, cosine, tokenize
 
 logger = logging.getLogger(__name__)
@@ -41,38 +41,8 @@ _STOPWORDS = {
 }
 
 
-# ── Embedding model (lazy singleton) ────────────────────────────────────────
-_model = None
-_model_load_attempted = False
-
-
-def _embedding_enabled() -> bool:
-    return os.environ.get("EMBEDDING_ENABLED", "true").lower() in ("1", "true", "yes")
-
-
-def _embedding_model_name() -> str:
-    return os.environ.get("EMBEDDING_MODEL", "paraphrase-multilingual-MiniLM-L12-v2")
-
-
-def _try_load_model():
-    """Attempt to load sentence-transformers model. Returns model or None."""
-    global _model, _model_load_attempted
-    if _model_load_attempted:
-        return _model
-    _model_load_attempted = True
-    if not _embedding_enabled():
-        logger.info("Embedding disabled via EMBEDDING_ENABLED; using TF fallback")
-        return None
-    try:
-        from sentence_transformers import SentenceTransformer  # type: ignore
-        model_name = _embedding_model_name()
-        logger.info("Loading sentence-transformers model %s ...", model_name)
-        _model = SentenceTransformer(model_name)
-        logger.info("Loaded embedding model %s", model_name)
-    except Exception as e:  # noqa: BLE001
-        logger.warning("Embedding model unavailable, using TF cosine fallback: %s", e)
-        _model = None
-    return _model
+# ── Embedding model — delegated to shared embedding.py singleton ─────────────
+# (model is loaded lazily on first call to get_model())
 
 
 # ── Keyword extraction (TF-IDF style) ────────────────────────────────────────
@@ -137,16 +107,19 @@ def compute_network(documents: List[Dict[str, Any]]) -> Dict[str, Any]:
     # Semantic vectors
     backend = "tf-cosine"
     sem_matrix: Optional[list] = None
-    model = _try_load_model()
+    model = get_model()
     if model is not None:
         try:
             texts = [_doc_text(d.get("sentences", [])) for d in documents]
             texts = [t if t.strip() else "empty" for t in texts]
-            embeddings = model.encode(texts, convert_to_numpy=True, show_progress_bar=False, normalize_embeddings=True)
-            # cosine similarity via dot product (normalized)
-            n = len(embeddings)
-            sem_matrix = [[float((embeddings[i] * embeddings[j]).sum()) for j in range(n)] for i in range(n)]
-            backend = f"sentence-transformers ({_embedding_model_name()})"
+            embeddings = embed_texts(texts)
+            if embeddings is not None:
+                # cosine similarity via dot product (L2-normalised vectors)
+                n = len(embeddings)
+                sem_matrix = [[float((embeddings[i] * embeddings[j]).sum()) for j in range(n)] for i in range(n)]
+                backend = f"sentence-transformers ({_embedding_model_name()})"
+            else:
+                sem_matrix = None
         except Exception as e:  # noqa: BLE001
             logger.warning("Embedding encode failed, falling back to TF cosine: %s", e)
             sem_matrix = None
