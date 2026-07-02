@@ -13,6 +13,8 @@ import {
   ShieldCheck,
   RotateCw,
   Clock,
+  Cpu,
+  Languages,
 } from "lucide-react";
 import { api } from "@/services/api";
 import { toast } from "sonner";
@@ -25,15 +27,32 @@ import AskPanel from "@/components/AskPanel";
 import EditableTitle from "@/components/EditableTitle";
 import CheckFix from "@/components/CheckFix/CheckFix";
 import { useT } from "@/lib/useT";
+import { useSettings } from "@/store/settings";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 
 export default function ProjectPage() {
   const { id } = useParams();
   const nav = useNavigate();
   const { t } = useT();
+  const { settings } = useSettings();
   const [project, setProject] = useState(null);
   const [docs, setDocs] = useState([]);
   const [busyUpload, setBusyUpload] = useState(false);
   const [tab, setTab] = useState("baca");
+  const [globalModel, setGlobalModel] = useState("");
+  const [globalLanguage, setGlobalLanguage] = useState("id");
+
+  useEffect(() => {
+    if (!globalModel && settings?.default_model) {
+      setGlobalModel(settings.default_model);
+    }
+  }, [settings?.default_model, globalModel]);
 
   const loadDocs = async () => {
     try {
@@ -146,42 +165,82 @@ export default function ProjectPage() {
 
       <main className="mx-auto max-w-[1600px] px-6 py-8">
         <Tabs value={tab} onValueChange={setTab} className="w-full">
-          <TabsList
-            data-testid="project-tabs"
-            className="bg-[var(--jm-surface)] border-2 border-[var(--jm-border-2)] p-1 rounded-lg h-auto"
-          >
-            <TabsTrigger
-              data-testid="tab-baca"
-              value="baca"
-              className="data-[state=active]:bg-[var(--jm-text)] data-[state=active]:text-[var(--jm-bg)] px-4 py-2 gap-2"
+          <div className="flex flex-wrap items-center justify-between gap-4 mb-6">
+            <TabsList
+              data-testid="project-tabs"
+              className="bg-[var(--jm-surface)] border-2 border-[var(--jm-border-2)] p-1 rounded-lg h-auto"
             >
-              <BookOpen className="w-4 h-4" /> Pustaka
-            </TabsTrigger>
-            <TabsTrigger
-              data-testid="tab-bandingkan"
-              value="bandingkan"
-              className="data-[state=active]:bg-[var(--jm-text)] data-[state=active]:text-[var(--jm-bg)] px-4 py-2 gap-2"
-            >
-              <GitCompare className="w-4 h-4" /> Matriks
-            </TabsTrigger>
-            <TabsTrigger
-              data-testid="tab-tanya"
-              value="tanya"
-              className="data-[state=active]:bg-[var(--jm-text)] data-[state=active]:text-[var(--jm-bg)] px-4 py-2 gap-2"
-            >
-              <MessageSquareText className="w-4 h-4" /> {t("tab.ask")}
-            </TabsTrigger>
-            <TabsTrigger
-              data-testid="tab-check-fix"
-              value="check-fix"
-              className="data-[state=active]:bg-[var(--jm-text)] data-[state=active]:text-[var(--jm-bg)] px-4 py-2 gap-2"
-            >
-              <ShieldCheck className="w-4 h-4" /> Check & Fix
-            </TabsTrigger>
-          </TabsList>
+              <TabsTrigger
+                data-testid="tab-baca"
+                value="baca"
+                className="data-[state=active]:bg-[var(--jm-text)] data-[state=active]:text-[var(--jm-bg)] px-4 py-2 gap-2"
+              >
+                <BookOpen className="w-4 h-4" /> Pustaka
+              </TabsTrigger>
+              <TabsTrigger
+                data-testid="tab-bandingkan"
+                value="bandingkan"
+                className="data-[state=active]:bg-[var(--jm-text)] data-[state=active]:text-[var(--jm-bg)] px-4 py-2 gap-2"
+              >
+                <GitCompare className="w-4 h-4" /> Matriks
+              </TabsTrigger>
+              <TabsTrigger
+                data-testid="tab-tanya"
+                value="tanya"
+                className="data-[state=active]:bg-[var(--jm-text)] data-[state=active]:text-[var(--jm-bg)] px-4 py-2 gap-2"
+              >
+                <MessageSquareText className="w-4 h-4" /> {t("tab.ask")}
+              </TabsTrigger>
+              <TabsTrigger
+                data-testid="tab-check-fix"
+                value="check-fix"
+                className="data-[state=active]:bg-[var(--jm-text)] data-[state=active]:text-[var(--jm-bg)] px-4 py-2 gap-2"
+              >
+                <ShieldCheck className="w-4 h-4" /> Check & Fix
+              </TabsTrigger>
+            </TabsList>
 
-          <TabsContent value="baca" className="mt-6">
-            <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
+            {/* Global Language and Model Selectors */}
+            <div className="flex items-center gap-3 bg-[var(--jm-surface)] border-2 border-[var(--jm-border-2)] p-1.5 rounded-lg">
+              {/* Language Selector */}
+              <div className="flex items-center gap-1.5 text-xs text-[color:var(--jm-text-2)] font-ui">
+                <Languages className="w-3.5 h-3.5 text-[color:var(--jm-text-3)]" />
+                <span className="font-semibold uppercase tracking-[0.1em] text-[10px] text-[color:var(--jm-text-3)]">Bahasa:</span>
+                <Select value={globalLanguage} onValueChange={setGlobalLanguage}>
+                  <SelectTrigger className="h-8 text-xs bg-[var(--jm-surface)] border-[color:var(--jm-border)] min-w-[140px]">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="id">Bahasa Indonesia</SelectItem>
+                    <SelectItem value="en">English</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+
+              <div className="w-px h-5 bg-[color:var(--jm-border)]" />
+
+              {/* Model Selector */}
+              <div className="flex items-center gap-1.5 text-xs text-[color:var(--jm-text-2)] font-ui">
+                <Cpu className="w-3.5 h-3.5 text-[color:var(--jm-text-3)]" />
+                <span className="font-semibold uppercase tracking-[0.1em] text-[10px] text-[color:var(--jm-text-3)]">Model:</span>
+                <Select value={globalModel} onValueChange={setGlobalModel}>
+                  <SelectTrigger className="h-8 text-xs bg-[var(--jm-surface)] border-[color:var(--jm-border)] min-w-[160px]">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {(settings?.available_models || []).map((m) => (
+                      <SelectItem key={`${m.provider}-${m.id}-${m.label}`} value={m.id}>
+                        {m.label}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+            </div>
+          </div>
+
+          <div className={tab === "baca" ? "" : "hidden"}>
+            <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 mt-6">
               <section className="lg:col-span-5">
                 <h3 className="text-[11px] uppercase tracking-[0.2em] font-semibold text-[color:var(--jm-text-3)] mb-3">
                   {t("project.add")}
@@ -269,19 +328,25 @@ export default function ProjectPage() {
                 <NetworkGraph projectId={id} docs={docs} />
               </div>
             )}
-          </TabsContent>
+          </div>
 
-          <TabsContent value="bandingkan" className="mt-6">
-            <MatrixView projectId={id} docs={docs} />
-          </TabsContent>
+          <div className={tab === "bandingkan" ? "" : "hidden"}>
+            <div className="mt-6">
+              <MatrixView projectId={id} docs={docs} globalModel={globalModel} globalLanguage={globalLanguage} />
+            </div>
+          </div>
 
-          <TabsContent value="tanya" className="mt-6">
-            <AskPanel projectId={id} docs={docs} />
-          </TabsContent>
+          <div className={tab === "tanya" ? "" : "hidden"}>
+            <div className="mt-6">
+              <AskPanel projectId={id} docs={docs} globalModel={globalModel} globalLanguage={globalLanguage} />
+            </div>
+          </div>
 
-          <TabsContent value="check-fix" className="mt-6">
-            <CheckFix projectId={id} docs={docs} />
-          </TabsContent>
+          <div className={tab === "check-fix" ? "" : "hidden"}>
+            <div className="mt-6">
+              <CheckFix projectId={id} docs={docs} />
+            </div>
+          </div>
         </Tabs>
       </main>
     </div>

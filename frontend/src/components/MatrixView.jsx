@@ -41,7 +41,7 @@ const FIELD_I18N = {
   statistical_test: { id: "Uji Statistik", en: "Statistical test" },
 };
 
-export default function MatrixView({ projectId, docs }) {
+export default function MatrixView({ projectId, docs, globalModel, globalLanguage }) {
   const ready = (docs || []).filter((d) => d.status === "ready");
   const { settings } = useSettings();
   const { t, lang } = useT();
@@ -49,13 +49,6 @@ export default function MatrixView({ projectId, docs }) {
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(false);
   const [activeCell, setActiveCell] = useState(null);
-  const [selectedModel, setSelectedModel] = useState(settings?.default_model || "");
-
-  useEffect(() => {
-    if (!selectedModel && settings?.default_model) {
-      setSelectedModel(settings.default_model);
-    }
-  }, [settings?.default_model, selectedModel]);
 
   const methods = settings?.matrix_methods || [
     { id: "default", label: "Default" },
@@ -75,7 +68,7 @@ export default function MatrixView({ projectId, docs }) {
     setLoading(true);
     setActiveCell(null);
     try {
-      const r = await api.matrix(projectId, null, refresh, method, selectedModel);
+      const r = await api.matrix(projectId, null, refresh, method, globalModel, globalLanguage);
       setData(r);
       if (refresh) toast.success(t("matrix.refresh"));
     } catch (e) {
@@ -110,30 +103,6 @@ export default function MatrixView({ projectId, docs }) {
           <Grid3x3 className="w-3.5 h-3.5" /> {t("matrix.title")}
         </div>
         <div className="flex items-center gap-2 ml-auto flex-wrap">
-          {/* Model Selection Dropdown */}
-          <div className="text-[10px] uppercase tracking-[0.2em] font-semibold text-[color:var(--jm-text-3)] flex items-center gap-1">
-            <Cpu className="w-3.5 h-3.5" /> Model
-          </div>
-          <Select value={selectedModel} onValueChange={setSelectedModel}>
-            <SelectTrigger
-              data-testid="matrix-model-select"
-              className="h-9 text-xs bg-[var(--jm-surface)] border-2 border-[var(--jm-border-2)] text-[color:var(--jm-text)] min-w-[150px]"
-            >
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              {(settings?.available_models || []).map((m) => (
-                <SelectItem
-                  key={`${m.provider}-${m.id}-${m.label}`}
-                  data-testid={`matrix-model-option-${m.id}`}
-                  value={m.id}
-                >
-                  {m.label}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-
           <div className="text-[10px] uppercase tracking-[0.2em] font-semibold text-[color:var(--jm-text-3)]">
             {t("matrix.method")}
           </div>
@@ -204,17 +173,17 @@ export default function MatrixView({ projectId, docs }) {
           </div>
 
           <div className="grid grid-cols-1 lg:grid-cols-12 gap-4">
-            <div className="lg:col-span-8 overflow-x-auto border border-[color:var(--jm-border)] rounded-lg">
-              <table data-testid="matrix-table" className="w-full text-sm border-collapse">
-                <thead>
+            <div className="lg:col-span-8 overflow-auto border border-[color:var(--jm-border)] rounded-lg max-h-[480px] scrollbar-thin">
+              <table data-testid="matrix-table" className="w-full text-sm border-collapse table-auto">
+                <thead className="sticky top-0 bg-[color:var(--jm-sidebar)] z-20">
                   <tr className="bg-[color:var(--jm-sidebar)]">
-                    <th className="text-left p-3 text-[10px] uppercase tracking-[0.18em] font-semibold text-[color:var(--jm-text-3)] sticky left-0 bg-[color:var(--jm-sidebar)] z-10 border-b border-r border-[color:var(--jm-border)]">
+                    <th className="text-left p-3 text-[10px] uppercase tracking-[0.18em] font-semibold text-[color:var(--jm-text-3)] sticky top-0 left-0 bg-[color:var(--jm-sidebar)] z-30 border-b border-r border-[color:var(--jm-border)]">
                       {t("matrix.col.journal")}
                     </th>
                     {data.fields.map((f) => (
                       <th
                         key={f}
-                        className="text-left p-3 text-[10px] uppercase tracking-[0.18em] font-semibold text-[color:var(--jm-text-3)] border-b border-r border-[color:var(--jm-border)] min-w-[180px]"
+                        className="text-left p-3 text-[10px] uppercase tracking-[0.18em] font-semibold text-[color:var(--jm-text-3)] sticky top-0 bg-[color:var(--jm-sidebar)] z-20 border-b border-r border-[color:var(--jm-border)] min-w-[180px]"
                       >
                         {fieldLabel(f)}
                       </th>

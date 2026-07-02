@@ -207,8 +207,14 @@ class MatrixResponse(BaseModel):
 
 
 # ----- Q&A -----
+class ChatMessage(BaseModel):
+    role: str  # "user" or "assistant"
+    content: str
+
+
 class AskRequest(BaseModel):
     question: str
+    history: Optional[List[ChatMessage]] = None
 
 
 class Citation(BaseModel):

@@ -111,18 +111,19 @@ export const api = {
     http.get(`/projects/${projectId}/network`).then((r) => r.data),
 
   // ── Matrix ──────────────────────────────────────────────────
-  matrix: (projectId, documentIds = null, refresh = false, method = "default", model = null) =>
+  matrix: (projectId, documentIds = null, refresh = false, method = "default", model = null, language = null) =>
     http
-      .post(`/projects/${projectId}/matrix`, { document_ids: documentIds, refresh, method, model })
+      .post(`/projects/${projectId}/matrix`, { document_ids: documentIds, refresh, method, model, language })
       .then((r) => r.data),
 
   // ── Ask ─────────────────────────────────────────────────────
-  ask: (projectId, question, language = null) => {
+  ask: (projectId, question, language = null, model = null, history = []) => {
     const params = new URLSearchParams();
     if (language) params.set("language", language);
+    if (model) params.set("model", model);
     const qs = params.toString();
     return http
-      .post(`/projects/${projectId}/ask${qs ? `?${qs}` : ""}`, { question })
+      .post(`/projects/${projectId}/ask${qs ? `?${qs}` : ""}`, { question, history })
       .then((r) => r.data);
   },
 

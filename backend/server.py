@@ -886,6 +886,7 @@ async def build_matrix(
     refresh: bool = Body(default=False, embed=True),
     method: str = Body(default="default", embed=True),
     model: Optional[str] = Body(default=None, embed=True),
+    language: Optional[str] = Body(default=None, embed=True),
     current_user: dict = Depends(get_current_user),
 ):
     await _project_or_forbidden(project_id, current_user)
@@ -913,6 +914,9 @@ async def build_matrix(
             
             sents = await db.sentences.find({"document_id": d["id"]}, {"_id": 0}).to_list(5000)
             settings_doc = await _load_settings()
+            settings_doc = {**settings_doc, **_local_llm_env_settings()}
+            settings_doc = _apply_language(settings_doc, language)
+            
             selected_model = model or settings_doc.get("default_model") or default_model()
             provider, model_id = split_provider_model(selected_model, settings_doc)
             try:
@@ -983,6 +987,7 @@ async def ask_library(
     provider, model_id = split_provider_model(model_id, settings)
     res = await answer_question(
         payload.question, inputs,
+        history=payload.history,
         user_settings=settings, provider=provider, model=model_id,
     )
     return AskResponse(

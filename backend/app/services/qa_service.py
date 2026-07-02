@@ -22,6 +22,7 @@ async def answer_question(
     top_per_doc: int = 4,
     max_total: int = 12,
     *,
+    history=None,
     user_settings=None,
     provider=None,
     model=None,
@@ -55,8 +56,21 @@ async def answer_question(
         f'S{i}. [Doc: {g["doc_title"][:60]}, p.{g["sentence"]["page"]}] "{g["sentence"]["text"]}"'
         for i, g in enumerate(gathered)
     )
+    
+    # Format chat history into prompt context
+    history_context = ""
+    if history:
+        history_lines = []
+        for msg in history:
+            role = getattr(msg, "role", None) or msg.get("role", "user")
+            content = getattr(msg, "content", None) or msg.get("content", "")
+            prefix = "User" if role == "user" else "Assistant"
+            history_lines.append(f"{prefix}: {content}")
+        history_context = "Conversation History:\n" + "\n".join(history_lines) + "\n\n"
+
     user = (
-        f"Question: {question}\n\n"
+        f"{history_context}"
+        f"Latest Question: {question}\n\n"
         f"Excerpts:\n{excerpts_str}\n\n"
         "Respond with JSON:\n"
         "{\n"
