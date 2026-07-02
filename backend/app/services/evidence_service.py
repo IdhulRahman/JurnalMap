@@ -71,15 +71,36 @@ async def find_evidence(
     results: List[Dict[str, Any]] = []
     for i, (s, bm25_score) in enumerate(top):
         v = verdict_map.get(i) or {}
-        tier = (v.get("tier") or "").lower()
-        if tier not in ("high", "medium", "low"):
-            # fallback heuristic based on BM25 score
-            if bm25_score >= 8:
+        
+        # Check if we have semantic cosine similarity from hybrid search
+        cosine_val = s.get("cosine_score", 0.0)
+        
+        if cosine_val > 0.0:
+            # Determine tier using semantic cosine similarity
+            if cosine_val >= 0.80:
                 tier = "high"
-            elif bm25_score >= 3:
+            elif cosine_val >= 0.50:
                 tier = "medium"
             else:
                 tier = "low"
+        else:
+            # Fallback to LLM verdict or legacy BM25 heuristic if embeddings are offline/missing
+            tier = (v.get("tier") or "").lower()
+            if tier not in ("high", "medium", "low"):
+                if bm25_score >= 8:
+                    tier = "high"
+                elif bm25_score >= 3:
+                    tier = "medium"
+                else:
+                    tier = "low"
+
+        # Set standard rationale messages based on status
+        rationale_text = (v.get("rationale") or "").strip()
+        if tier == "medium":
+            rationale_text = "Klaim ini merupakan rangkaian dari beberapa sumber dengan tambahan inferensi AI."
+        elif tier == "low":
+            rationale_text = "Tidak ditemukan bukti di koleksi paper."
+
         results.append(
             {
                 "sentence_id": s["id"],
@@ -93,7 +114,7 @@ async def find_evidence(
                 "text": s["text"],
                 "tier": tier,
                 "score": float(bm25_score),
-                "rationale": (v.get("rationale") or "").strip()[:120],
+                "rationale": rationale_text[:120],
             }
         )
     # only keep medium/high in highlights, but still return low for completeness

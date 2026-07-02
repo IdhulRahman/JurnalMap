@@ -38,6 +38,7 @@
 .cf-similar {
   background: rgba(245, 158, 11, 0.10);
   border-left-color: #f59e0b;
+  font-style: italic;
 }
 .cf-unsupported {
   background: rgba(244, 63, 94, 0.09);

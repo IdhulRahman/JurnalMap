@@ -132,6 +132,7 @@ def rrf_top_k(
     # ── Semantic ranking (optional) ───────────────────────────────────────────
     has_embeddings = any(s.get("embedding") for s in sentences)
     semantic_rank: Dict[int, int] = {}
+    sem_results = None
 
     if has_embeddings:
         sem_results = semantic_top_k(query, sentences, k=len(sentences))
@@ -153,11 +154,60 @@ def rrf_top_k(
             score += semantic_weight / (rrf_k + sem_r)
         rrf_scores[i] = score
 
+    # Map semantic scores for quick lookup
+    sem_scores_dict: Dict[str, float] = {}
+    if has_embeddings and 'sem_results' in locals() and sem_results:
+        for sent, sem_score in sem_results:
+            sem_scores_dict[sent.get("id", "")] = sem_score
+
     top_idxs = sorted(rrf_scores.keys(), key=lambda i: rrf_scores[i], reverse=True)[:k]
-    # Only return sentences with positive BM25 score OR positive semantic score
+    
+    # Calculate query token length for scaling semantic scores to match the BM25 scale
+    qtoks_count = max(len(tokenize(query)), 1)
+
     results = []
     for i in top_idxs:
+        # Only return sentences with positive BM25 score OR positive semantic score
         if bm25_scores[i] > 0 or i in semantic_rank:
-            results.append((sentences[i], rrf_scores[i]))
+            sent = sentences[i]
+            raw_bm25 = float(bm25_scores[i])
+            sem_score = sem_scores_dict.get(sent.get("id", ""), 0.0)
+
+            # Map semantic similarity (0.0 to 1.0) into the BM25-equivalent scale
+            # so that threshold-based classifiers (e.g. >= 1.0 per token) work correctly.
+            sem_boost = 0.0
+            if sem_score >= 0.75:
+                # Strong semantic match -> translates to supported (1.2 per token)
+                sem_boost = 1.2 * qtoks_count
+            elif sem_score >= 0.60:
+                # Partial semantic match -> translates to similar (0.6 per token)
+                sem_boost = 0.6 * qtoks_count
+            elif sem_score >= 0.45:
+                sem_boost = 0.3 * qtoks_count
+
+            # Combined score ensures strong BM25 OR strong Semantic matches can pass
+            similarity_score = max(raw_bm25, sem_boost)
+            
+            # Sentence window expansion: retrieve previous and next sentences for context
+            text_prev = ""
+            text_next = ""
+            current_doc_id = sent.get("document_id")
+            
+            if i > 0 and sentences[i-1].get("document_id") == current_doc_id:
+                text_prev = sentences[i-1].get("text", "")
+            if i < len(sentences) - 1 and sentences[i+1].get("document_id") == current_doc_id:
+                text_next = sentences[i+1].get("text", "")
+                
+            # Merge with surrounding sentence window for better context in evidence tracking
+            context_text = " ".join([t for t in [text_prev, sent.get("text", ""), text_next] if t])
+            
+            # Create a copy to prevent side effects on cached collections,
+            # attaching raw score metadata and context text for downstream classifiers.
+            sent_copy = dict(sent)
+            sent_copy["text"] = context_text
+            sent_copy["cosine_score"] = float(sem_score)
+            sent_copy["bm25_score"] = raw_bm25
+            results.append((sent_copy, similarity_score))
+
     return results
 

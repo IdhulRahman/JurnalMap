@@ -225,16 +225,29 @@ def check_text(
             continue
 
         best_sent, best_score = ranked[0]
-        score_per_token = best_score / max(len(qtoks), 1)
-        boost = _bibliography_boost(qtext, bibliography)
-        effective = score_per_token * (1.0 + boost)
-
-        if effective >= SUPPORT_THRESHOLD:
-            status = "supported"
-        elif effective >= SIMILAR_THRESHOLD:
-            status = "similar"
+        
+        # Determine classification using semantic cosine similarity if available
+        cosine_val = best_sent.get("cosine_score", 0.0)
+        
+        if cosine_val > 0.0:
+            if cosine_val >= 0.80:
+                status = "supported"
+            elif cosine_val >= 0.50:
+                status = "similar"
+            else:
+                status = "unsupported"
+            effective = cosine_val
         else:
-            status = "unsupported"
+            # Fallback to legacy token-overlap (BM25) scoring if embeddings are offline/missing
+            score_per_token = best_score / max(len(qtoks), 1)
+            boost = _bibliography_boost(qtext, bibliography)
+            effective = score_per_token * (1.0 + boost)
+            if effective >= SUPPORT_THRESHOLD:
+                status = "supported"
+            elif effective >= SIMILAR_THRESHOLD:
+                status = "similar"
+            else:
+                status = "unsupported"
 
         unit_entry: Dict[str, Any] = {
             "unit_id": unit_id,

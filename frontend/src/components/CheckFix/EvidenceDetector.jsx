@@ -41,8 +41,11 @@ export default function EvidenceDetector({ projectId, badge }) {
         <Search className="w-3.5 h-3.5" /> Detektor Bukti
       </div>
       {!badge ? (
-        <div className="text-xs text-[color:var(--jm-text-3)] font-ui italic">
-          Klik lencana sitasi pada hasil verifikasi untuk melihat kalimat sumber.
+        <div className="text-xs text-[color:var(--jm-text-3)] font-ui italic space-y-3">
+          <div>Klik lencana sitasi pada hasil verifikasi untuk melihat kalimat sumber.</div>
+          <div className="pt-2 text-[11px] text-rose-500 font-semibold border-t border-[color:var(--jm-border)]">
+            Tidak ditemukan bukti di koleksi paper.
+          </div>
         </div>
       ) : (
         <div className="space-y-3">
@@ -57,12 +60,20 @@ export default function EvidenceDetector({ projectId, badge }) {
             <span data-testid="checkfix-evidence-doc-title">{data?.document_title || badge.document_title || ""}</span>
             {(data?.page || badge.page) ? <span>· hal. {data?.page || badge.page}</span> : null}
           </div>
+          
           <blockquote
             data-testid="checkfix-evidence-quote"
             className="border-l-2 border-[color:var(--jm-text)] pl-3 font-reading text-sm leading-relaxed text-[color:var(--jm-text)]"
           >
             &ldquo;{data?.text || badge.quote || "(kutipan tidak tersedia)"}&rdquo;
           </blockquote>
+
+          {badge.status === "similar" && (
+            <div className="text-[11.5px] text-amber-700 dark:text-amber-400 font-ui italic bg-amber-500/10 p-2.5 rounded-md border-l-2 border-amber-500 leading-normal">
+              Klaim ini merupakan rangkaian dari beberapa sumber dengan tambahan inferensi AI.
+            </div>
+          )}
+
           {err && (
             <div className="text-[11px] text-[color:var(--jm-text-3)] italic font-ui">{err}</div>
           )}
@@ -70,7 +81,7 @@ export default function EvidenceDetector({ projectId, badge }) {
             <Link
               data-testid="checkfix-evidence-open-baca"
               to={`/project/${projectId}/doc/${data.document_id}`}
-              className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-md text-xs font-semibold font-ui bg-[color:var(--jm-text)] text-[color:var(--jm-bg)] hover:opacity-90"
+              className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-md text-xs font-semibold font-ui bg-[color:var(--jm-text)] text-[color:var(--jm-bg)] hover:opacity-90 mt-1"
             >
               <LinkIcon className="w-3 h-3" /> Buka di Tab Baca
             </Link>
