@@ -17,7 +17,7 @@ function App() {
     <div className="App">
       <AuthProvider>
         <SettingsProvider>
-          <Toaster position="top-right" richColors />
+          <Toaster position="bottom-right" closeButton richColors />
           <BrowserRouter>
             <Routes>
               {/* Public auth routes */}

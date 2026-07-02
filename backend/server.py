@@ -896,6 +896,9 @@ async def build_matrix(
     docs = await db.documents.find(query, {"_id": 0}).to_list(500)
     rows = []
     fields: List[str] = []
+    # Track if we made an LLM call in this request to apply spacing between API calls
+    need_spacing = False
+    
     for d in docs:
         title = d.get("title") or d.get("filename")
         cache_key = {"document_id": d["id"], "method": method}
@@ -903,6 +906,10 @@ async def build_matrix(
         if cached and isinstance(cached.get("cells"), list) and cached["cells"]:
             row = {"document_id": d["id"], "title": title, "cells": cached["cells"]}
         else:
+            if need_spacing:
+                await asyncio.sleep(1.5)  # Pace requests to prevent hitting RPM limits
+            need_spacing = True
+            
             sents = await db.sentences.find({"document_id": d["id"]}, {"_id": 0}).to_list(5000)
             settings_doc = await _load_settings()
             provider, model_id = split_provider_model(settings_doc.get("default_model") or default_model(), settings_doc)
@@ -912,19 +919,34 @@ async def build_matrix(
                     user_settings=settings_doc, provider=provider, model=model_id,
                     method=method,
                 )
-            except LLMJSONError as e:
-                raise HTTPException(502, f"Model returned malformed JSON for matrix ({e})")
-            await db.matrix_cache.update_one(
-                cache_key,
-                {"$set": {
+                await db.matrix_cache.update_one(
+                    cache_key,
+                    {"$set": {
+                        "document_id": d["id"],
+                        "method": method,
+                        "title": title,
+                        "cells": row["cells"],
+                        "cached_at": utcnow_iso(),
+                    }},
+                    upsert=True,
+                )
+            except Exception as e:
+                logger.error("Failed to generate matrix row for doc %s: %s", d["id"], e)
+                # Create a placeholder row instead of crashing the whole matrix page
+                fallback_fields = fields_for(method)
+                row = {
                     "document_id": d["id"],
-                    "method": method,
                     "title": title,
-                    "cells": row["cells"],
-                    "cached_at": utcnow_iso(),
-                }},
-                upsert=True,
-            )
+                    "cells": [
+                        {
+                            "field": f,
+                            "value": f"Batas limit API tercapai / Gagal memuat ({str(e)[:60]})",
+                            "excerpt": None,
+                            "page": None
+                        }
+                        for f in fallback_fields
+                    ]
+                }
         if not fields and row["cells"]:
             fields = [c["field"] for c in row["cells"]]
         rows.append(MatrixRow(document_id=row["document_id"], title=row["title"],
