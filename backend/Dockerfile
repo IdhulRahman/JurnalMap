@@ -54,10 +54,8 @@ RUN groupadd -r appuser && useradd -r -g appuser appuser \
 
 WORKDIR /app
 
-# Pre-download model files to image cache so user doesn't experience runtime delays.
-# Downloads sentence-transformers (embedding model) and docling (layout/table models).
+# Pre-download sentence-transformers embedding model so user doesn't experience runtime delays.
 RUN python -c "from sentence_transformers import SentenceTransformer; SentenceTransformer('paraphrase-multilingual-MiniLM-L12-v2')" \
- && python -c "from docling.document_converter import DocumentConverter, PdfFormatOption, InputFormat; from docling.datamodel.pipeline_options import PdfPipelineOptions; opts = PdfPipelineOptions(); opts.do_ocr = False; DocumentConverter(format_options={InputFormat.PDF: PdfFormatOption(pipeline_options=opts)})" \
  && chown -R appuser:appuser /app/models
 
 COPY --chown=appuser:appuser . .

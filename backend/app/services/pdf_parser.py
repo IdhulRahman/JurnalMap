@@ -1,13 +1,12 @@
-"""PDF parsing using Docling — extract layout-aware elements and sentences with bounding boxes."""
+"""PDF parsing using PyMuPDF — extract sentences with bounding boxes."""
 from __future__ import annotations
 
 import re
 from pathlib import Path
 from typing import List, Dict, Any
 
-from docling.datamodel.base_models import InputFormat
-from docling.datamodel.pipeline_options import PdfPipelineOptions
-from docling.document_converter import DocumentConverter, PdfFormatOption
+import fitz  # PyMuPDF
+
 
 SECTION_PATTERNS = {
     "abstract": re.compile(r"^\s*abstract\b", re.I),
@@ -19,11 +18,12 @@ SECTION_PATTERNS = {
     "references": re.compile(r"^\s*references?\b", re.I),
 }
 
+
 _SENTENCE_SPLIT = re.compile(r"(?<=[.!?])\s+(?=[A-Z\"\(])")
 
 
 def split_sentences(text: str) -> List[str]:
-    """Lightweight sentence splitter."""
+    """Lightweight sentence splitter (no spaCy needed)."""
     text = text.replace("\n", " ").strip()
     text = re.sub(r"\s+", " ", text)
     if not text:
@@ -32,137 +32,104 @@ def split_sentences(text: str) -> List[str]:
     return [p.strip() for p in parts if len(p.strip()) > 5]
 
 
-_converter = None
-
-
-def _get_converter() -> DocumentConverter:
-    """Lazy loader for DocumentConverter singleton to avoid re-initializing models on every parse."""
-    global _converter
-    if _converter is not None:
-        return _converter
-
-    # Configure Docling to disable OCR to avoid PyTorch errors and speed up processing
-    pipeline_options = PdfPipelineOptions()
-    pipeline_options.do_ocr = False
-
-    # Auto-detect and configure CUDA device if available
-    try:
-        import torch  # type: ignore
-        if torch.cuda.is_available():
-            from docling.datamodel.accelerator_options import AcceleratorDevice, AcceleratorOptions
-            pipeline_options.accelerator_options = AcceleratorOptions(
-                device=AcceleratorDevice.CUDA
-            )
-    except Exception:
-        pass
-
-    _converter = DocumentConverter(
-        format_options={
-            InputFormat.PDF: PdfFormatOption(pipeline_options=pipeline_options)
-        }
-    )
-    return _converter
-
-
 def parse_pdf(pdf_path: str | Path) -> Dict[str, Any]:
-    """Return dict: { page_count, title, sentences, quality } using Docling."""
-    pdf_path = str(pdf_path)
-    converter = _get_converter()
-    result = converter.convert(pdf_path)
-    doc = result.document
+    """Return dict: { page_count, title, sentences, quality }.
 
-    title = doc.name or ""
+    quality = {
+        score: int (0-100),
+        pages_with_text: int,
+        total_pages: int,
+        tables_count: int,
+        figures_count: int,
+        label: "good" | "fair" | "poor",
+    }
+    """
+    pdf_path = str(pdf_path)
+    doc = fitz.open(pdf_path)
+    title = (doc.metadata or {}).get("title") or ""
     sentences: List[Dict[str, Any]] = []
     current_section = "other"
 
-    pages_with_text = set()
-    tables_count = len(doc.tables) if hasattr(doc, "tables") else 0
-    figures_count = len(doc.pictures) if hasattr(doc, "pictures") else 0
+    pages_with_text = 0
+    tables_count = 0
+    figures_count = 0
 
-    # Iterate through all elements in the document using iterate_items()
-    for item, level in doc.iterate_items():
-        # Check text attribute
-        if not hasattr(item, "text"):
-            continue
-        line_text = item.text.strip()
-        if not line_text:
-            continue
+    for page_idx, page in enumerate(doc):
+        pw, ph = page.rect.width, page.rect.height
+        blocks = page.get_text("dict").get("blocks", [])
+        page_text_chars = 0
+        page_has_table = False
+        for block in blocks:
+            btype = block.get("type", 0)
+            if btype == 1:  # image block
+                figures_count += 1
+                continue
+            for line in block.get("lines", []):
+                spans = line.get("spans", [])
+                if not spans:
+                    continue
+                line_text = "".join(s.get("text", "") for s in spans).strip()
+                if not line_text:
+                    continue
+                page_text_chars += len(line_text)
+                # Section heading detection
+                for sec, pat in SECTION_PATTERNS.items():
+                    if pat.match(line_text) and len(line_text) < 60:
+                        current_section = sec
+                        break
+                # Naive table heuristic: presence of "Table N" caption
+                if re.match(r"^\s*table\s+\d+", line_text, re.I) and len(line_text) < 80:
+                    page_has_table = True
+                x0, y0, x1, y1 = line["bbox"]
+                for sent in split_sentences(line_text):
+                    sentences.append(
+                        {
+                            "page": page_idx + 1,
+                            "page_width": pw,
+                            "page_height": ph,
+                            "x0": x0,
+                            "y0": y0,
+                            "x1": x1,
+                            "y1": y1,
+                            "text": sent,
+                            "section": current_section,
+                        }
+                    )
+        if page_text_chars >= 50:  # heuristic threshold for "has readable text"
+            pages_with_text += 1
+        if page_has_table:
+            tables_count += 1
 
-        # Extract page number and coordinate provenance
-        page_idx = 1
-        x0, y0, x1, y1 = 0, 0, 0, 0
-        pw, ph = 612, 792  # Default to letter size in points
-
-        if hasattr(item, "prov") and item.prov:
-            prov = item.prov[0]
-            page_idx = getattr(prov, "page_no", 1)
-            pages_with_text.add(page_idx)
-            
-            bbox = getattr(prov, "bbox", None)
-            if bbox:
-                x0 = getattr(bbox, "l", 0)
-                y0 = getattr(bbox, "t", 0)
-                x1 = getattr(bbox, "r", 0)
-                y1 = getattr(bbox, "b", 0)
-                
-            # Resolve page size from doc.pages
-            if hasattr(doc, "pages") and doc.pages and page_idx in doc.pages:
-                page_obj = doc.pages[page_idx]
-                pw = getattr(page_obj, "width", 612)
-                ph = getattr(page_obj, "height", 792)
-
-        # Detect section headings
-        label = str(getattr(item, "label", "")).lower()
-        is_heading = "heading" in label or "title" in label
-        if is_heading and len(line_text) < 60:
-            for sec, pat in SECTION_PATTERNS.items():
-                if pat.match(line_text):
-                    current_section = sec
-                    break
-
-        for sent in split_sentences(line_text):
-            sentences.append(
-                {
-                    "page": page_idx,
-                    "page_width": pw,
-                    "page_height": ph,
-                    "x0": x0,
-                    "y0": y0,
-                    "x1": x1,
-                    "y1": y1,
-                    "text": sent,
-                    "section": current_section,
-                }
-            )
-
-    # Fallback title heuristics
+    # heuristic title fallback
     if not title and sentences:
         first_page = [s for s in sentences if s["page"] == 1]
         if first_page:
-            title = first_page[0]["text"][:200]
+            top = [s for s in first_page if s["y0"] < first_page[0]["page_height"] / 3]
+            if top:
+                title = max(top, key=lambda s: len(s["text"]))["text"][:200]
 
-    # Quality scoring based on pages containing successfully read text
-    total_pages = len(doc.pages) if getattr(doc, "pages", None) else 1
-    if not total_pages and pages_with_text:
-        total_pages = max(pages_with_text)
-    if not total_pages:
-        total_pages = 1
+    page_count = doc.page_count
+    doc.close()
 
-    num_pages_with_text = len(pages_with_text)
-    score = int(round((num_pages_with_text / total_pages) * 100)) if total_pages else 0
-    label = "good" if score >= 80 else "fair" if score >= 50 else "poor"
+    # Quality score = pages with text / total pages
+    score = int(round((pages_with_text / page_count) * 100)) if page_count else 0
+    if score >= 80:
+        label = "good"
+    elif score >= 50:
+        label = "fair"
+    else:
+        label = "poor"
 
     quality = {
         "score": score,
-        "pages_with_text": num_pages_with_text,
-        "total_pages": total_pages,
+        "pages_with_text": pages_with_text,
+        "total_pages": page_count,
         "tables_count": tables_count,
         "figures_count": figures_count,
         "label": label,
     }
-
     return {
-        "page_count": total_pages,
+        "page_count": page_count,
         "title": title,
         "sentences": sentences,
         "quality": quality,
