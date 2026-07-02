@@ -56,11 +56,12 @@ def parse_pdf(pdf_path: str | Path) -> Dict[str, Any]:
     tables_count = len(doc.tables) if hasattr(doc, "tables") else 0
     figures_count = len(doc.pictures) if hasattr(doc, "pictures") else 0
 
-    # Iterate through all elements in the document
-    elements = getattr(doc, "elements", [])
-    for element in elements:
+    # Iterate through all elements in the document using iterate_items()
+    for item, level in doc.iterate_items():
         # Check text attribute
-        line_text = getattr(element, "text", "").strip()
+        if not hasattr(item, "text"):
+            continue
+        line_text = item.text.strip()
         if not line_text:
             continue
 
@@ -69,9 +70,8 @@ def parse_pdf(pdf_path: str | Path) -> Dict[str, Any]:
         x0, y0, x1, y1 = 0, 0, 0, 0
         pw, ph = 612, 792  # Default to letter size in points
 
-        prov_list = getattr(element, "prov", [])
-        if prov_list:
-            prov = prov_list[0]
+        if hasattr(item, "prov") and item.prov:
+            prov = item.prov[0]
             page_idx = getattr(prov, "page_no", 1)
             pages_with_text.add(page_idx)
             
@@ -82,13 +82,14 @@ def parse_pdf(pdf_path: str | Path) -> Dict[str, Any]:
                 x1 = getattr(bbox, "r", 0)
                 y1 = getattr(bbox, "b", 0)
                 
-            page = getattr(prov, "page", None)
-            if page:
-                pw = getattr(page, "width", 612)
-                ph = getattr(page, "height", 792)
+            # Resolve page size from doc.pages
+            if hasattr(doc, "pages") and doc.pages and page_idx in doc.pages:
+                page_obj = doc.pages[page_idx]
+                pw = getattr(page_obj, "width", 612)
+                ph = getattr(page_obj, "height", 792)
 
         # Detect section headings
-        label = str(getattr(element, "label", "")).lower()
+        label = str(getattr(item, "label", "")).lower()
         is_heading = "heading" in label or "title" in label
         if is_heading and len(line_text) < 60:
             for sec, pat in SECTION_PATTERNS.items():
@@ -118,7 +119,7 @@ def parse_pdf(pdf_path: str | Path) -> Dict[str, Any]:
             title = first_page[0]["text"][:200]
 
     # Quality scoring based on pages containing successfully read text
-    total_pages = doc.num_pages if hasattr(doc, "num_pages") else 1
+    total_pages = len(doc.pages) if getattr(doc, "pages", None) else 1
     if not total_pages and pages_with_text:
         total_pages = max(pages_with_text)
     if not total_pages:
