@@ -1,11 +1,11 @@
-"""PDF parsing using PyMuPDF — extract sentences with bounding boxes."""
+"""PDF parsing using PyMuPDF & pymupdf4llm — extract sentences with bounding boxes."""
 from __future__ import annotations
 
 import re
 from pathlib import Path
 from typing import List, Dict, Any
 
-import fitz  # PyMuPDF
+from .hybrid_pdf_parser import HybridParser
 
 
 SECTION_PATTERNS = {
@@ -32,6 +32,49 @@ def split_sentences(text: str) -> List[str]:
     return [p.strip() for p in parts if len(p.strip()) > 5]
 
 
+def align_words_to_sentences(sents: List[str], words: List[Any]) -> List[List[Any]]:
+    """Align list of words to list of sentences, returning a list of word-lists (one per sentence)."""
+    # Normalize words
+    word_tokens = []
+    for w in words:
+        norm = re.sub(r"[^a-zA-Z0-9]", "", w.text).lower()
+        if norm:
+            word_tokens.append((norm, w))
+            
+    # Normalize sentences into token sequences
+    sent_token_seqs = []
+    for s in sents:
+        tokens = [re.sub(r"[^a-zA-Z0-9]", "", t).lower() for t in s.split()]
+        tokens = [t for t in tokens if t]
+        sent_token_seqs.append(tokens)
+        
+    results = [[] for _ in sents]
+    word_idx = 0
+    n_words = len(word_tokens)
+    
+    for s_idx, tokens in enumerate(sent_token_seqs):
+        if not tokens:
+            continue
+        for token in tokens:
+            found = False
+            # Search window of 10 words ahead
+            for offset in range(10):
+                curr_idx = word_idx + offset
+                if curr_idx >= n_words:
+                    break
+                if word_tokens[curr_idx][0] == token:
+                    # Match found! Add all words from word_idx to curr_idx to this sentence
+                    for i in range(word_idx, curr_idx + 1):
+                        results[s_idx].append(word_tokens[i][1])
+                    word_idx = curr_idx + 1
+                    found = True
+                    break
+            if not found:
+                pass
+                
+    return results
+
+
 def parse_pdf(pdf_path: str | Path) -> Dict[str, Any]:
     """Return dict: { page_count, title, sentences, quality }.
 
@@ -45,73 +88,105 @@ def parse_pdf(pdf_path: str | Path) -> Dict[str, Any]:
     }
     """
     pdf_path = str(pdf_path)
-    doc = fitz.open(pdf_path)
-    title = (doc.metadata or {}).get("title") or ""
+    
+    parser = HybridParser()
+    doc = parser.parse(pdf_path)
+    
     sentences: List[Dict[str, Any]] = []
     current_section = "other"
-
+    
     pages_with_text = 0
     tables_count = 0
     figures_count = 0
-
-    for page_idx, page in enumerate(doc):
-        pw, ph = page.rect.width, page.rect.height
-        blocks = page.get_text("dict").get("blocks", [])
-        page_text_chars = 0
+    
+    for page in doc.pages:
+        pw, ph = page.width, page.height
+        page_has_text = False
         page_has_table = False
-        for block in blocks:
-            btype = block.get("type", 0)
-            if btype == 1:  # image block
+        
+        for block in page.blocks:
+            # Type classification
+            if block.type == "image":
                 figures_count += 1
                 continue
-            for line in block.get("lines", []):
-                spans = line.get("spans", [])
-                if not spans:
-                    continue
-                line_text = "".join(s.get("text", "") for s in spans).strip()
-                if not line_text:
-                    continue
-                page_text_chars += len(line_text)
-                # Section heading detection
+            elif block.type == "table":
+                tables_count += 1
+                page_has_table = True
+                
+                # Extract markdown table as a single sentence block
+                x0, y0, x1, y1 = block.bbox
+                sentences.append(
+                    {
+                        "page": page.page_number,
+                        "page_width": pw,
+                        "page_height": ph,
+                        "x0": x0,
+                        "y0": y0,
+                        "x1": x1,
+                        "y1": y1,
+                        "text": f"[TABLE]\n{block.markdown.strip()}",
+                        "section": current_section,
+                    }
+                )
+                continue
+            
+            block_text = block.markdown.strip()
+            if not block_text:
+                continue
+                
+            page_has_text = True
+            
+            # If it's a heading block, detect section heading updates
+            if block.type == "heading":
+                clean_text = block_text.strip().lower()
                 for sec, pat in SECTION_PATTERNS.items():
-                    if pat.match(line_text) and len(line_text) < 60:
+                    if pat.match(clean_text) and len(clean_text) < 60:
                         current_section = sec
                         break
-                # Naive table heuristic: presence of "Table N" caption
-                if re.match(r"^\s*table\s+\d+", line_text, re.I) and len(line_text) < 80:
-                    page_has_table = True
-                x0, y0, x1, y1 = line["bbox"]
-                for sent in split_sentences(line_text):
-                    sentences.append(
-                        {
-                            "page": page_idx + 1,
-                            "page_width": pw,
-                            "page_height": ph,
-                            "x0": x0,
-                            "y0": y0,
-                            "x1": x1,
-                            "y1": y1,
-                            "text": sent,
-                            "section": current_section,
-                        }
-                    )
-        if page_text_chars >= 50:  # heuristic threshold for "has readable text"
+            
+            # Split block text into sentences (handles sentences spanning multiple lines correctly)
+            sents = split_sentences(block_text)
+            
+            # Align words to sentences to get accurate bounding boxes
+            aligned_sentence_words = align_words_to_sentences(sents, block.words)
+            
+            for s_idx, sent in enumerate(sents):
+                matching_words = aligned_sentence_words[s_idx]
+                if matching_words:
+                    x0 = min(w.bbox[0] for w in matching_words)
+                    y0 = min(w.bbox[1] for w in matching_words)
+                    x1 = max(w.bbox[2] for w in matching_words)
+                    y1 = max(w.bbox[3] for w in matching_words)
+                else:
+                    x0, y0, x1, y1 = block.bbox
+                
+                sentences.append(
+                    {
+                        "page": page.page_number,
+                        "page_width": pw,
+                        "page_height": ph,
+                        "x0": x0,
+                        "y0": y0,
+                        "x1": x1,
+                        "y1": y1,
+                        "text": sent,
+                        "section": current_section,
+                    }
+                )
+                
+        if page_has_text or page_has_table:
             pages_with_text += 1
-        if page_has_table:
-            tables_count += 1
-
-    # heuristic title fallback
-    if not title and sentences:
+            
+    # Fallback title logic
+    title = doc.metadata.source_file
+    if sentences:
         first_page = [s for s in sentences if s["page"] == 1]
         if first_page:
             top = [s for s in first_page if s["y0"] < first_page[0]["page_height"] / 3]
             if top:
                 title = max(top, key=lambda s: len(s["text"]))["text"][:200]
-
-    page_count = doc.page_count
-    doc.close()
-
-    # Quality score = pages with text / total pages
+                
+    page_count = doc.metadata.total_pages
     score = int(round((pages_with_text / page_count) * 100)) if page_count else 0
     if score >= 80:
         label = "good"
@@ -119,7 +194,7 @@ def parse_pdf(pdf_path: str | Path) -> Dict[str, Any]:
         label = "fair"
     else:
         label = "poor"
-
+        
     quality = {
         "score": score,
         "pages_with_text": pages_with_text,
@@ -128,6 +203,7 @@ def parse_pdf(pdf_path: str | Path) -> Dict[str, Any]:
         "figures_count": figures_count,
         "label": label,
     }
+    
     return {
         "page_count": page_count,
         "title": title,
